@@ -1,4 +1,6 @@
+import json
 import atexit
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -21,6 +23,8 @@ from mcp_server.registry import ObjectRegistry
 object_registry = ObjectRegistry()
 # 记录当前会话保存的截图文件路径，用于退出时清理
 _saved_screenshots: list[Path] = []
+# 记录当前加载的资源路径，用于 pipeline 管理
+_current_resource_path: Optional[Path] = None
 
 mcp = FastMCP(
     "MAA MCP",
@@ -50,10 +54,12 @@ mcp = FastMCP(
        - 调用 create_tasker(controller_id, resource_id) 创建任务管理器实例
        - 将控制器与资源绑定，获取任务管理器 ID
 
-    5. 自动化执行循环
-       - 调用 ocr(tasker_id) 进行屏幕截图并执行 OCR 识别
-       - 根据识别结果调用 click() 或 swipe() 执行相应操作
-       - 重复执行步骤 5，直至任务完成
+    5. 自动化执行
+       - 方式一（推荐）：调用 run_pipeline(tasker_id, entry) 执行预定义的任务流水线
+       - 方式二（手动）：
+         - 调用 ocr(tasker_id) 进行屏幕截图并执行 OCR 识别
+         - 根据识别结果调用 click() 或 swipe() 执行相应操作
+         - 重复执行，直至任务完成
 
     屏幕识别策略（重要）：
     - 优先使用 OCR：始终优先调用 ocr() 进行文字识别，OCR 返回结构化文本数据，token 消耗极低
@@ -118,6 +124,24 @@ def find_window_list() -> list[str]:
     for window in window_list:
         object_registry.register_by_name(window.window_name, window)
     return [window.window_name for window in window_list if window.window_name]
+
+
+@mcp.tool(
+    name="wait",
+    description="""
+    等待指定的时间（秒）。
+    当需要等待界面加载、动画完成或操作生效时，以及其他需要等待的情况下使用。
+    注意：由于客户端超时限制，单次等待最长支持 60 秒。如果需要等待更长时间，请多次调用。
+    """,
+)
+def wait(seconds: float) -> str:
+    max_wait = 60.0
+    if seconds > max_wait:
+        time.sleep(max_wait)
+        return f"已等待 {max_wait} 秒（单次最大限制）。请再次调用 wait 以继续等待剩余时间。"
+    
+    time.sleep(seconds)
+    return f"已等待 {seconds} 秒"
 
 
 @mcp.tool(
@@ -205,11 +229,15 @@ def connect_window(window_name: str) -> Optional[str]:
 """,
 )
 def load_resource(resource_path: str) -> Optional[str]:
-    if not Path(resource_path).exists():
+    global _current_resource_path
+    path = Path(resource_path)
+    if not path.exists():
         return None
     resource = Resource()
     if not resource.post_bundle(resource_path).wait().succeeded:
         return None
+    
+    _current_resource_path = path
     return object_registry.register(resource)
 
 
@@ -241,6 +269,125 @@ def create_tasker(controller_id: str, resource_id: str) -> Optional[str]:
         return None
 
     return object_registry.register(tasker)
+
+
+@mcp.tool(
+    name="run_pipeline",
+    description="""
+    运行指定的任务流水线。
+
+    参数：
+    - tasker_id: 任务管理器 ID，由 create_tasker() 返回
+    - entry: 流水线入口节点名称（字符串），需在 pipeline.json 中定义
+    - pipeline_override: 流水线覆盖配置（字典，可选），用于动态修改流水线参数，默认为 {}
+
+    返回值：
+    - 成功：返回 True
+    - 失败：返回 False
+
+    说明：
+    流水线任务会自动执行一系列识别和操作，直到任务完成或失败。
+    """,
+)
+def run_pipeline(tasker_id: str, entry: str, pipeline_override: dict = {}) -> bool:
+    tasker: Tasker | None = object_registry.get(tasker_id)
+    if not tasker:
+        return False
+
+    return tasker.post_task(entry, pipeline_override).wait().succeeded
+
+
+@mcp.tool(
+    name="list_pipelines",
+    description="""
+    列出当前加载资源中的所有可用流水线文件。
+
+    返回值：
+    - 成功：返回流水线文件名列表（如 ["MyTask.json", "Daily.json"]）
+    - 失败：返回 None（未加载资源或目录不存在）
+
+    说明：
+    必须先调用 load_resource() 加载资源。
+    """,
+)
+def list_pipelines() -> Optional[list[str]]:
+    if not _current_resource_path:
+        return None
+    
+    pipeline_dir = _current_resource_path / "pipeline"
+    if not pipeline_dir.exists():
+        return []
+    
+    return [f.name for f in pipeline_dir.glob("*.json")]
+
+
+@mcp.tool(
+    name="read_pipeline",
+    description="""
+    读取指定流水线文件的内容。
+
+    参数：
+    - filename: 流水线文件名（如 "MyTask.json"）
+
+    返回值：
+    - 成功：返回流水线文件的 JSON 内容（字典）
+    - 失败：返回 None（文件不存在或读取失败）
+
+    说明：
+    用于查看现有流水线的具体实现，判断是否满足需求。
+    """,
+)
+def read_pipeline(filename: str) -> Optional[dict]:
+    if not _current_resource_path:
+        return None
+    
+    filepath = _current_resource_path / "pipeline" / filename
+    if not filepath.exists():
+        return None
+    
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+@mcp.tool(
+    name="save_pipeline",
+    description="""
+    保存或更新流水线文件。
+
+    参数：
+    - filename: 流水线文件名（如 "NewTask.json"），必须以 .json 结尾
+    - content: 流水线内容（字典），符合 MaaFramework 流水线协议格式
+
+    返回值：
+    - 成功：返回 True
+    - 失败：返回 False
+
+    重要提示：
+    1. 保存后，若要立即生效，建议重新调用 load_resource() 和 create_tasker() 以确保新文件被正确加载。
+    2. 请谨慎覆盖现有文件。
+    """,
+)
+def save_pipeline(filename: str, content: dict) -> bool:
+    if not _current_resource_path:
+        return False
+    
+    if not filename.endswith(".json"):
+        filename += ".json"
+        
+    pipeline_dir = _current_resource_path / "pipeline"
+    pipeline_dir.mkdir(parents=True, exist_ok=True)
+    
+    filepath = pipeline_dir / filename
+    
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(content, f, indent=4, ensure_ascii=False)
+        return True
+    except Exception:
+        return False
 
 
 @mcp.tool(

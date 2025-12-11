@@ -449,3 +449,5 @@ tools/ImageCropper/**/*.png
 
 config
 debug
+/.venv
+run.bat
