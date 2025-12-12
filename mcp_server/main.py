@@ -332,7 +332,7 @@ def _get_or_create_tasker(resource_id: str) -> Optional[Tasker]:
         return None
 
     tasker = Tasker()
-    tasker.bind(resource, Controller())
+    tasker.bind(resource, Controller(None))
     if not tasker.inited:
         return None
 
