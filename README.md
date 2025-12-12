@@ -92,7 +92,7 @@ Talk is cheap, 请看: **[🎞️ Bilibili 视频演示](https://www.bilibili.co
 4. **安装 Python 依赖**
 
     ```bash
-    pip install -r mcp_server/requirements.txt
+    pip install -r maa_mcp/requirements.txt
     ```
 
 ### 配置 MCP 客户端
@@ -111,7 +111,7 @@ Talk is cheap, 请看: **[🎞️ Bilibili 视频演示](https://www.bilibili.co
 
 ```shell
 cd MaaMCP
-python -m mcp_server
+python -m maa_mcp
 ```
 
 ## 使用示例

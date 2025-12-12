@@ -88,7 +88,7 @@ MaaMCP is a Model Context Protocol server that exposes MaaFramework's powerful a
 4. **Install Python dependencies**
 
     ```bash
-    pip install -r mcp_server/requirements.txt
+    pip install -r maa_mcp/requirements.txt
     ```
 
 ### Configure MCP Clients
@@ -107,7 +107,7 @@ You can follow the Cursor/Claude Code config approach above. MaaMCP can be start
 
 ```shell
 cd MaaMCP
-python -m mcp_server
+python -m maa_mcp
 ```
 
 ## Usage Examples

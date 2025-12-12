@@ -4,7 +4,7 @@
             "command": "python",
             "args": [
                 "-m",
-                "mcp_server"
+                "maa_mcp"
             ],
             "cwd": "${workspaceFolder}"
         }
