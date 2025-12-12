@@ -28,6 +28,7 @@ MaaMCP 是一个 MCP 服务器，将 MaaFramework 的强大自动化能力通过
 
 - 🤖 **Android 自动化** - 通过 ADB 连接并控制 Android 设备/模拟器
 - 🖥️ **Windows 自动化** - 控制 Windows 桌面应用程序
+  - 🎯 **后台操作** - Windows 上的截图与控制均在后台运行，不占用鼠标键盘，您可以继续使用电脑做其他事情
 - 🔗 **多设备协同** - 同时控制多个设备/窗口，实现跨设备自动化
 - 👁️ **智能识别** - 使用 OCR 识别屏幕文字内容
 - 🎯 **精准操作** - 执行点击、滑动、文本输入、按键等操作
@@ -162,6 +163,14 @@ graph LR
 - 禁止直接执行 `adb` 命令或窗口句柄 API
 - 这确保了 AI 助手操作的可控性和安全性
 
+### 注意事项
+
+📌 **Windows 自动化限制**：
+
+- 部分游戏或应用的反作弊机制可能会拦截后台控制操作
+- 若目标应用以管理员权限运行，MaaMCP 也需要以管理员权限启动
+- 不支持对最小化的窗口进行操作，请保持目标窗口在非最小化状态
+
 ### 常见问题
 
 #### OCR 识别失败，报错 "Failed to load det or rec"
@@ -192,6 +201,7 @@ MaaMCP is a Model Context Protocol server that exposes MaaFramework's powerful a
 
 - 🤖 **Android Automation** - Connect and control Android devices/emulators via ADB
 - 🖥️ **Windows Automation** - Control Windows desktop applications
+  - 🎯 **Background Operation** - Screenshots and controls on Windows run in the background without occupying your mouse or keyboard, allowing you to continue using your computer for other tasks
 - 🔗 **Multi-Device Coordination** - Control multiple devices/windows simultaneously for cross-device automation
 - 👁️ **Smart Recognition** - Use OCR to recognize on-screen text
 - 🎯 **Precise Operations** - Execute clicks, swipes, text input, key presses, and more
@@ -321,6 +331,14 @@ graph LR
 - All ADB and window operations must go through MCP tools
 - Direct execution of `adb` commands or window handle APIs is prohibited
 - This ensures AI assistant operations are controlled and secure
+
+### Notes
+
+📌 **Windows Automation Limitations**:
+
+- Some games or applications with anti-cheat mechanisms may block background control operations
+- If the target application runs with administrator privileges, MaaMCP must also be launched with administrator privileges
+- Minimized windows are not supported; please keep the target window in a non-minimized state
 
 ### FAQ
 
