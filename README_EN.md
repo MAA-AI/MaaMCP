@@ -7,10 +7,11 @@
 
 # MaaMCP
 
-[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+![license](https://img.shields.io/github/license/MistEO/MaaMCP)
+![activity](https://img.shields.io/github/commit-activity/m/MistEO/MaaMCP?color=%23ff69b4)
+![stars](https://img.shields.io/github/stars/MistEO/MaaMCP?style=social)  
 [![MaaFramework](https://img.shields.io/badge/MaaFramework-v5-green)](https://github.com/MaaXYZ/MaaFramework)
-[![Python](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org/)
-[![PyPI](https://img.shields.io/pypi/v/maa-mcp)](https://pypi.org/project/maa-mcp/)
+[![PyPI](https://img.shields.io/pypi/v/maa-mcp?logo=pypi&logoColor=white)](https://pypi.org/project/maa-mcp/)
 
 MCP Server based on [MaaFramework](https://github.com/MaaXYZ/MaaFramework)
 Providing Android device and Windows desktop automation capabilities for AI assistants
@@ -88,9 +89,7 @@ pip install maa-mcp
 
 ### Configure MCP Clients
 
-#### Cursor IDE
-
-Add to Cursor's MCP configuration (Settings → MCP → Add):
+Add MCP configuration:
 
 ```json
 {
@@ -100,50 +99,11 @@ Add to Cursor's MCP configuration (Settings → MCP → Add):
     }
   }
 }
-```
-
-Or if using uvx:
-
-```json
-{
-  "mcpServers": {
-    "MaaMCP": {
-      "command": "uvx",
-      "args": ["maa-mcp"]
-    }
-  }
-}
-```
-
-#### Claude Code CLI
-
-Add to Claude Code configuration:
-
-```json
-{
-  "mcpServers": {
-    "MaaMCP": {
-      "command": "maa-mcp"
-    }
-  }
-}
-```
-
-#### Other clients
-
-MaaMCP can be started with:
-
-```shell
-# If installed via pip
-maa-mcp
-
-# If running from source
-python -m maa_mcp
 ```
 
 ## Usage Examples
 
-After configuration, you can use it in Cursor:
+After configuration, you can use it:
 
 **Android Automation Example:**
 

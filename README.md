@@ -7,10 +7,11 @@
 
 # MaaMCP
 
-[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+![license](https://img.shields.io/github/license/MistEO/MaaMCP)
+![activity](https://img.shields.io/github/commit-activity/m/MistEO/MaaMCP?color=%23ff69b4)
+![stars](https://img.shields.io/github/stars/MistEO/MaaMCP?style=social)  
 [![MaaFramework](https://img.shields.io/badge/MaaFramework-v5-green)](https://github.com/MaaXYZ/MaaFramework)
-[![Python](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org/)
-[![PyPI](https://img.shields.io/pypi/v/maa-mcp)](https://pypi.org/project/maa-mcp/)
+[![PyPI](https://img.shields.io/pypi/v/maa-mcp?logo=pypi&logoColor=white)](https://pypi.org/project/maa-mcp/)
 
 基于 [MaaFramework](https://github.com/MaaXYZ/MaaFramework) 的 MCP 服务器
 为 AI 助手提供 Android 设备和 Windows 桌面自动化能力
@@ -88,9 +89,7 @@ pip install maa-mcp
 
 ### 配置 MCP 客户端
 
-#### Cursor IDE
-
-在 Cursor 的 MCP 配置中添加（设置 → MCP → 添加）：
+添加 MCP 配置：
 
 ```json
 {
@@ -100,50 +99,11 @@ pip install maa-mcp
     }
   }
 }
-```
-
-或者如果使用 uvx：
-
-```json
-{
-  "mcpServers": {
-    "MaaMCP": {
-      "command": "uvx",
-      "args": ["maa-mcp"]
-    }
-  }
-}
-```
-
-#### Claude Code CLI
-
-在 Claude Code 配置中添加：
-
-```json
-{
-  "mcpServers": {
-    "MaaMCP": {
-      "command": "maa-mcp"
-    }
-  }
-}
-```
-
-#### 其他客户端
-
-MaaMCP 启动方式为：
-
-```shell
-# 如果通过 pip 安装
-maa-mcp
-
-# 如果从源码运行
-python -m maa_mcp
 ```
 
 ## 使用示例
 
-配置完成后，在 Cursor 中可以这样使用：
+配置完成后，可以这样使用：
 
 **Android 自动化示例：**
 
