@@ -41,7 +41,7 @@ classifiers = [
     "Topic :: System :: Hardware",
 ]
 dependencies = [
-    "maafw>=5.2.4",
+    "maafw>=5.2.6",
     "fastmcp>=2.0.0",
     "opencv-python>=4.0.0",
     "platformdirs>=4.0.0",
