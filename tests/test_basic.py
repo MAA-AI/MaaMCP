@@ -137,4 +137,3 @@ class TestCore:
         from maa_mcp.main import mcp
 
         assert mcp is not None
-

@@ -55,7 +55,7 @@ Talk is cheap, see: **[🎞️ Bilibili Video Demo](https://www.bilibili.com/vid
 - `click` - Click at coordinates (supports multi-touch/mouse button selection, long press)
   - On Windows, supports mouse button selection: left, right, middle
 - `double_click` - Double click at coordinates
-- `swipe` - Swipe gesture
+- `swipe` - Swipe gesture (preferred for scrolling/paging on Android)
 - `input_text` - Input text
 - `click_key` - Key press (supports long press)
   - On Android, simulates system keys: Back(4), Home(3), Menu(82), Volume keys, etc.

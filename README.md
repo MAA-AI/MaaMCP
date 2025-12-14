@@ -55,7 +55,7 @@ Talk is cheap, 请看: **[🎞️ Bilibili 视频演示](https://www.bilibili.co
 - `click` - 点击指定坐标（支持多触点/鼠标按键选择、长按）
   - Windows 上支持指定鼠标按键：左键、右键、中键
 - `double_click` - 双击指定坐标
-- `swipe` - 滑动手势
+- `swipe` - 滑动手势（Android 设备滚动/翻页优先使用）
 - `input_text` - 输入文本
 - `click_key` - 按键操作（支持长按）
   - Android 上可模拟系统按键：返回键(4)、Home键(3)、菜单键(82)、音量键等

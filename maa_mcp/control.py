@@ -92,6 +92,10 @@ def double_click(
     description="""
     在设备屏幕上执行手势滑动操作，模拟手指从起始点滑动到终点。
 
+    使用建议：
+    - ADB（Android 设备/模拟器）场景下，如需滚动/翻页，优先使用 swipe()
+    - Windows（桌面窗口）场景下，如需滚动列表/页面，优先使用 scroll()；仅在需要拖拽/滑动手势时使用 swipe()
+
     参数：
     - controller_id: 控制器 ID，由 connect_adb_device() 或 connect_window() 返回
     - start_x: 起始点的 X 坐标（像素，整数）
@@ -252,6 +256,10 @@ def keyboard_shortcut(
     name="scroll",
     description="""
     在设备屏幕上执行鼠标滚轮操作。
+
+    使用建议：
+    - Windows（桌面窗口）场景下，如需滚动列表/页面，优先使用 scroll()
+    - ADB（Android 设备/模拟器）不支持 scroll()，请使用 swipe() 进行滑动/滚动
 
     参数：
     - controller_id: 控制器 ID，由 connect_adb_device() 或 connect_window() 返回

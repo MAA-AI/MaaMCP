@@ -65,7 +65,7 @@ mcp = FastMCP(
        - 调用 ocr(controller_id) 对指定设备进行屏幕截图和 OCR 识别
        - 首次使用时，如果 OCR 模型文件不存在，ocr() 会返回提示信息，需要调用 check_and_download_ocr() 下载资源
        - 下载完成后即可正常使用 OCR 功能，后续调用无需再次下载
-       - 根据识别结果调用 click()、double_click()、swipe() 等执行相应操作
+       - 根据识别结果调用 click()、double_click()、scroll()、swipe() 等执行相应操作
        - 所有操作通过 controller_id 指定目标设备/窗口
        - 可在多个设备间切换操作，实现协同自动化
 
@@ -75,6 +75,10 @@ mcp = FastMCP(
       1. OCR 结果不足以做出决策（如需要识别图标、图像、颜色、布局等非文字信息）
       2. 反复 OCR + 操作后界面状态无预期变化，可能存在弹窗、遮挡或其他视觉异常需要人工判断
     - 图片识别会消耗大量 token，应尽量避免频繁调用
+
+    滚动/翻页策略（重要）：
+    - ADB（Android 设备/模拟器）：优先使用 swipe() 实现页面滚动/列表翻动（scroll() 不支持 ADB）
+    - Windows（桌面窗口）：优先使用 scroll() 实现列表/页面滚动（更符合鼠标滚轮语义）；仅在需要“拖拽/滑动手势”时才使用 swipe()
 
     注意事项：
     - controller_id 为字符串类型，由系统自动生成并管理
