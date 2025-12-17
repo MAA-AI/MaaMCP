@@ -109,6 +109,24 @@ mcp = FastMCP(
     - 严禁在终端中直接执行窗口句柄相关命令（如 GetWindowText、GetWindowTextLength 等）
     - 严禁使用其他第三方库或方法与 ADB 设备或窗口句柄交互
     - 严禁绕过本 MCP 工具自行实现设备控制逻辑
+
+    Pipeline 生成功能：
+    当用户要求生成 Pipeline 时，可以将执行过的自动化操作转换为 MaaFramework Pipeline JSON 格式，
+    以便后续直接运行而无需再次调用 AI。
+
+    生成 Pipeline 的工作流程：
+    1. 先执行完所需的自动化操作
+    2. 调用 get_pipeline_protocol() 获取 Pipeline 协议文档
+    3. 根据文档规范，将执行过的**有效操作**编写为 Pipeline JSON
+    4. 调用 save_pipeline() 保存生成的 Pipeline
+
+    生成 Pipeline 的关键原则：
+    - 只保留成功路径：如果操作过程中尝试了多条路径（如先进入 A 菜单没找到目标，
+      返回后又进入 B 菜单才找到），只在 Pipeline 中保留最终成功的路径（B 菜单），
+      不要包含失败的尝试（A 菜单的操作）
+    - 优先使用 OCR 识别：使用文字匹配比坐标匹配更具鲁棒性
+    - 合理设置识别区域：根据 OCR 结果的坐标设置 roi 可以提高识别效率
+    - 节点命名清晰：使用描述性的中文节点名称
     """,
 )
 

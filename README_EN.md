@@ -64,6 +64,11 @@ Talk is cheap, see: **[🎞️ Bilibili Video Demo](https://www.bilibili.com/vid
   - Supports key combinations: Ctrl+C, Ctrl+V, Alt+Tab, etc.
 - `scroll` - Mouse wheel (Windows only)
 
+### 📝 Pipeline Generation
+
+- `get_pipeline_protocol` - Get Pipeline protocol documentation
+- `save_pipeline` - Save generated Pipeline JSON to file
+
 ## Quick Start
 
 ### Installation
@@ -127,6 +132,13 @@ Please use the MaaMCP tools to connect to my Android device, open Meituan, and h
 Please use the MaaMCP tools to show me how to add a rotation animation effect to the current PPT slide, and demonstrate the steps.
 ```
 
+**Pipeline Generation Example:**
+
+```text
+Please use MaaMCP tools to connect to my device, help me open Settings, go to Display settings, and adjust brightness to 50%.
+After completing the operations, generate a Pipeline JSON for this workflow so it can be run directly later.
+```
+
 MaaMCP will automatically:
 
 1. Scan available devices/windows
@@ -147,6 +159,86 @@ graph LR
 1. **Scan** - Use `find_adb_device_list` or `find_window_list`
 2. **Connect** - Use `connect_adb_device` or `connect_window` (can connect multiple devices/windows, each gets a unique controller ID)
 3. **Operate** - Execute OCR, click, swipe, etc. on multiple devices/windows by specifying different controller IDs (OCR resources auto-download on first use)
+
+## Pipeline Generation
+
+MaaMCP supports AI converting executed operations into [MaaFramework Pipeline](https://github.com/MaaXYZ/MaaFramework) JSON format, enabling **operate once, reuse infinitely**.
+
+### How It Works
+
+```mermaid
+graph LR
+    A[AI Executes Operations] --> B[Operations Complete]
+    B --> C[AI Reads Pipeline Docs]
+    C --> D[AI Intelligently Generates Pipeline]
+    D --> E[Save JSON File]
+    E --> F[Run Directly Later]
+```
+
+1. **Execute Operations** - AI performs OCR, click, swipe, and other automation operations normally
+2. **Get Documentation** - Call `get_pipeline_protocol` to get Pipeline protocol specification
+3. **Intelligent Generation** - AI converts **valid operations** into Pipeline JSON based on the documentation
+4. **Save File** - Call `save_pipeline` to save the generated Pipeline
+
+### Advantages of Intelligent Generation
+
+Unlike mechanical recording, AI intelligent generation offers these advantages:
+
+- **Only Keeps Successful Paths**: If multiple paths were tried during operation (e.g., first entering Menu A without finding the target, then returning and entering Menu B to find it), AI will only keep the final successful path, removing failed attempts
+- **Understands Operation Intent**: AI can understand the purpose of each operation and generate semantically clear node names
+- **Optimizes Recognition Conditions**: Intelligently sets recognition regions and matching conditions based on OCR results
+
+### Example Output
+
+```json
+{
+  "StartTask": {
+    "recognition": "DirectHit",
+    "action": "DoNothing",
+    "next": ["ClickSettings"]
+  },
+  "ClickSettings": {
+    "recognition": "OCR",
+    "expected": "Settings",
+    "action": "Click",
+    "next": ["EnterDisplay"]
+  },
+  "EnterDisplay": {
+    "recognition": "OCR",
+    "expected": "Display",
+    "action": "Click",
+    "next": ["AdjustBrightness"]
+  },
+  "AdjustBrightness": {
+    "recognition": "OCR",
+    "expected": "Brightness",
+    "action": "Swipe",
+    "begin": [200, 500],
+    "end": [400, 500],
+    "duration": 200
+  }
+}
+```
+
+### Running Generated Pipelines
+
+Generated Pipeline JSON can be run via:
+
+1. **Using MaaFramework Python Bindings**:
+
+```python
+from maa.resource import Resource
+from maa.tasker import Tasker
+
+resource = Resource()
+resource.post_bundle("path/to/resource").wait()
+
+tasker = Tasker()
+tasker.bind(resource, controller)
+tasker.post_task("StartTask").wait()
+```
+
+2. **Integrate into MaaFramework Project**: Place the JSON file in the project's `pipeline` directory
 
 ## Notes
 
