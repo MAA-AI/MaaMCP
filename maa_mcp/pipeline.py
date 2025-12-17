@@ -56,7 +56,6 @@ Pipeline 是 MaaFramework 的任务流水线，采用 JSON 格式描述，由若
 参数：
 - `expected`: string | list<string> - 期望匹配的文字，支持正则表达式
 - `roi`: [x, y, w, h] - 识别区域，可选，默认全屏 [0, 0, 0, 0]
-- `threshold`: double - 置信度阈值，可选，默认 0.3
 
 示例：
 ```json
@@ -183,10 +182,7 @@ Pipeline 是 MaaFramework 的任务流水线，采用 JSON 格式描述，由若
 ## 通用属性
 
 - `next`: string | list<string> - 后续节点列表，按顺序尝试识别
-- `timeout`: uint - 识别超时时间（毫秒），默认 20000
-- `pre_delay`: uint - 识别到后、执行动作前的延迟（毫秒），默认 200
 - `post_delay`: uint - 执行动作后、识别 next 前的延迟（毫秒），默认 200
-- `rate_limit`: uint - 识别速率限制（毫秒），默认 1000
 
 ## 完整示例
 

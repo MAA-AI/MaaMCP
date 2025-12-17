@@ -162,7 +162,7 @@ graph LR
 
 ## Pipeline Generation
 
-MaaMCP supports AI converting executed operations into [MaaFramework Pipeline](https://github.com/MaaXYZ/MaaFramework) JSON format, enabling **operate once, reuse infinitely**.
+MaaMCP supports AI converting executed operations into [MaaFramework Pipeline](https://maafw.xyz/docs/3.1-PipelineProtocol) JSON format, enabling **operate once, reuse infinitely**.
 
 ### How It Works
 
@@ -219,26 +219,6 @@ Unlike mechanical recording, AI intelligent generation offers these advantages:
   }
 }
 ```
-
-### Running Generated Pipelines
-
-Generated Pipeline JSON can be run via:
-
-1. **Using MaaFramework Python Bindings**:
-
-```python
-from maa.resource import Resource
-from maa.tasker import Tasker
-
-resource = Resource()
-resource.post_bundle("path/to/resource").wait()
-
-tasker = Tasker()
-tasker.bind(resource, controller)
-tasker.post_task("StartTask").wait()
-```
-
-2. **Integrate into MaaFramework Project**: Place the JSON file in the project's `pipeline` directory
 
 ## Notes
 

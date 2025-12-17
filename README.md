@@ -162,7 +162,7 @@ graph LR
 
 ## Pipeline 生成功能
 
-MaaMCP 支持让 AI 将执行过的操作转换为 [MaaFramework Pipeline](https://github.com/MaaXYZ/MaaFramework) JSON 格式，实现**一次操作，无限复用**。
+MaaMCP 支持让 AI 将执行过的操作转换为 [MaaFramework Pipeline](https://maafw.xyz/docs/3.1-PipelineProtocol) JSON 格式，实现**一次操作，无限复用**。
 
 ### 工作原理
 
@@ -219,26 +219,6 @@ graph LR
   }
 }
 ```
-
-### 运行生成的 Pipeline
-
-生成的 Pipeline JSON 可以通过以下方式运行：
-
-1. **使用 MaaFramework Python 绑定**：
-
-```python
-from maa.resource import Resource
-from maa.tasker import Tasker
-
-resource = Resource()
-resource.post_bundle("path/to/resource").wait()
-
-tasker = Tasker()
-tasker.bind(resource, controller)
-tasker.post_task("开始任务").wait()
-```
-
-2. **集成到 MaaFramework 项目**：将 JSON 文件放入项目的 `pipeline` 目录即可
 
 ## 注意事项
 
