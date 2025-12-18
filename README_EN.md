@@ -70,6 +70,7 @@ Talk is cheap, see: **[🎞️ Bilibili Video Demo](https://www.bilibili.com/vid
 - `save_pipeline` - Save Pipeline JSON to file (supports creating and updating)
 - `load_pipeline` - Load an existing Pipeline file
 - `run_pipeline` - Run Pipeline and return execution results
+- `open_pipeline_in_browser` - Open Pipeline visualization in browser
 
 ## Quick Start
 

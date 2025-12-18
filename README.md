@@ -70,6 +70,7 @@ Talk is cheap, 请看: **[🎞️ Bilibili 视频演示](https://www.bilibili.co
 - `save_pipeline` - 保存 Pipeline JSON 到文件（支持新建和更新）
 - `load_pipeline` - 读取已有的 Pipeline 文件
 - `run_pipeline` - 运行 Pipeline 并返回执行结果
+- `open_pipeline_in_browser` - 在浏览器中打开 Pipeline 可视化界面
 
 ## 快速开始
 
