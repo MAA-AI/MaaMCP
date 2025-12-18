@@ -64,6 +64,13 @@ Talk is cheap, 请看: **[🎞️ Bilibili 视频演示](https://www.bilibili.co
   - 支持组合键：Ctrl+C、Ctrl+V、Alt+Tab 等
 - `scroll` - 鼠标滚轮（仅 Windows）
 
+### 📝 Pipeline 生成与运行
+
+- `get_pipeline_protocol` - 获取 Pipeline 协议文档
+- `save_pipeline` - 保存 Pipeline JSON 到文件（支持新建和更新）
+- `load_pipeline` - 读取已有的 Pipeline 文件
+- `run_pipeline` - 运行 Pipeline 并返回执行结果
+
 ## 快速开始
 
 ### 安装方式
@@ -127,6 +134,13 @@ maa-mcp
 请用 MaaMCP 工具，看看我现在这页 PPT 怎么加一个旋转特效，操作给我看下
 ```
 
+**Pipeline 生成示例：**
+
+```text
+请用 MaaMCP 工具连接我的设备，帮我打开设置，进入显示设置，调整亮度到 50%。
+操作完成后，帮我生成这个流程的 Pipeline JSON，以便后续可以直接运行。
+```
+
 MaaMCP 会自动：
 
 1. 扫描可用设备/窗口
@@ -147,6 +161,90 @@ graph LR
 1. **扫描** - 使用 `find_adb_device_list` 或 `find_window_list`
 2. **连接** - 使用 `connect_adb_device` 或 `connect_window`（可连接多个设备/窗口，获得多个控制器 ID）
 3. **操作** - 通过指定不同的控制器 ID，对多个设备/窗口执行 OCR、点击、滑动等自动化操作
+
+## Pipeline 生成功能
+
+MaaMCP 支持让 AI 将执行过的操作转换为 [MaaFramework Pipeline](https://maafw.xyz/docs/3.1-PipelineProtocol) JSON 格式，实现**一次操作，无限复用**。
+
+### 工作原理
+
+```mermaid
+graph LR
+    A[AI 执行操作] --> B[操作完成]
+    B --> C[AI 阅读 Pipeline 文档]
+    C --> D[AI 智能生成 Pipeline]
+    D --> E[保存 JSON 文件]
+    E --> F[运行验证]
+    F --> G{是否成功?}
+    G -->|是| H[完成]
+    G -->|否| I[分析失败原因]
+    I --> J[修改 Pipeline]
+    J --> F
+```
+
+1. **执行操作** - AI 正常执行 OCR、点击、滑动等自动化操作
+2. **获取文档** - 调用 `get_pipeline_protocol` 获取 Pipeline 协议规范
+3. **智能生成** - AI 根据文档规范，将**有效操作**转换为 Pipeline JSON
+4. **保存文件** - 调用 `save_pipeline` 保存生成的 Pipeline
+5. **运行验证** - 调用 `run_pipeline` 验证 Pipeline 是否正常运行
+6. **迭代优化** - 根据运行结果分析失败原因，修改 Pipeline 直到成功
+
+### 智能生成的优势
+
+与机械录制不同，AI 智能生成具有以下优势：
+
+- **只保留成功路径**：如果操作过程中尝试了多条路径（如先进入 A 菜单没找到，返回后又进入 B 菜单才找到），AI 会只保留最终成功的路径，去掉失败的尝试
+- **理解操作意图**：AI 能够理解每个操作的目的，生成语义清晰的节点名称
+- **优化识别条件**：根据 OCR 结果智能设置识别区域和匹配条件
+- **验证与迭代**：通过运行验证发现问题，自动修复并增强鲁棒性
+
+### 验证与迭代优化
+
+Pipeline 生成后，AI 会自动进行验证和优化：
+
+1. **运行验证** - 执行 Pipeline 检查是否成功
+2. **失败分析** - 如果失败，分析具体哪个节点出错及原因
+3. **智能修复** - 常见优化手段：
+   - 增加备选识别节点（在 next 列表中添加多个候选）
+   - 放宽 OCR 匹配条件（使用正则表达式或部分匹配）
+   - 调整 roi 识别区域
+   - 增加等待时间（post_delay）
+   - 添加中间状态检测节点
+4. **重新验证** - 修改后再次运行，直到稳定成功
+
+如果发现 Pipeline 逻辑本身有问题，AI 还可以重新执行自动化操作，结合新旧经验生成更完善的 Pipeline。
+
+### 示例输出
+
+```json
+{
+  "开始任务": {
+    "recognition": "DirectHit",
+    "action": "DoNothing",
+    "next": ["点击设置"]
+  },
+  "点击设置": {
+    "recognition": "OCR",
+    "expected": "设置",
+    "action": "Click",
+    "next": ["进入显示"]
+  },
+  "进入显示": {
+    "recognition": "OCR",
+    "expected": "显示",
+    "action": "Click",
+    "next": ["调整亮度"]
+  },
+  "调整亮度": {
+    "recognition": "OCR",
+    "expected": "亮度",
+    "action": "Swipe",
+    "begin": [200, 500],
+    "end": [400, 500],
+    "duration": 200
+  }
+}
+```
 
 ## 注意事项
 

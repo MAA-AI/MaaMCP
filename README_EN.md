@@ -64,6 +64,13 @@ Talk is cheap, see: **[🎞️ Bilibili Video Demo](https://www.bilibili.com/vid
   - Supports key combinations: Ctrl+C, Ctrl+V, Alt+Tab, etc.
 - `scroll` - Mouse wheel (Windows only)
 
+### 📝 Pipeline Generation & Execution
+
+- `get_pipeline_protocol` - Get Pipeline protocol documentation
+- `save_pipeline` - Save Pipeline JSON to file (supports creating and updating)
+- `load_pipeline` - Load an existing Pipeline file
+- `run_pipeline` - Run Pipeline and return execution results
+
 ## Quick Start
 
 ### Installation
@@ -127,6 +134,13 @@ Please use the MaaMCP tools to connect to my Android device, open Meituan, and h
 Please use the MaaMCP tools to show me how to add a rotation animation effect to the current PPT slide, and demonstrate the steps.
 ```
 
+**Pipeline Generation Example:**
+
+```text
+Please use MaaMCP tools to connect to my device, help me open Settings, go to Display settings, and adjust brightness to 50%.
+After completing the operations, generate a Pipeline JSON for this workflow so it can be run directly later.
+```
+
 MaaMCP will automatically:
 
 1. Scan available devices/windows
@@ -147,6 +161,90 @@ graph LR
 1. **Scan** - Use `find_adb_device_list` or `find_window_list`
 2. **Connect** - Use `connect_adb_device` or `connect_window` (can connect multiple devices/windows, each gets a unique controller ID)
 3. **Operate** - Execute OCR, click, swipe, etc. on multiple devices/windows by specifying different controller IDs (OCR resources auto-download on first use)
+
+## Pipeline Generation
+
+MaaMCP supports AI converting executed operations into [MaaFramework Pipeline](https://maafw.xyz/docs/3.1-PipelineProtocol) JSON format, enabling **operate once, reuse infinitely**.
+
+### How It Works
+
+```mermaid
+graph LR
+    A[AI Executes Operations] --> B[Operations Completed]
+    B --> C[AI Reads Pipeline Docs]
+    C --> D[AI Intelligently Generates Pipeline]
+    D --> E[Save JSON File]
+    E --> F[Run Validation]
+    F --> G{Success?}
+    G -->|Yes| H[Done]
+    G -->|No| I[Analyze Failure]
+    I --> J[Modify Pipeline]
+    J --> F
+```
+
+1. **Execute Operations** - AI performs OCR, clicks, swipes, and other automation operations normally
+2. **Get Documentation** - Call `get_pipeline_protocol` to get the Pipeline protocol specification
+3. **Intelligent Generation** - AI converts **valid operations** into Pipeline JSON based on the documentation
+4. **Save File** - Call `save_pipeline` to save the generated Pipeline
+5. **Run Validation** - Call `run_pipeline` to verify the Pipeline works correctly
+6. **Iterative Optimization** - Analyze failures and modify Pipeline until successful
+
+### Advantages of Intelligent Generation
+
+Unlike mechanical recording, AI intelligent generation offers these advantages:
+
+- **Only Keeps Successful Paths**: If multiple paths were tried during operation (e.g., first entering Menu A without finding the target, then returning and entering Menu B to find it), AI will only keep the final successful path, removing failed attempts
+- **Understands Operation Intent**: AI can understand the purpose of each operation and generate semantically clear node names
+- **Optimizes Recognition Conditions**: Intelligently sets recognition regions and matching conditions based on OCR results
+- **Validation & Iteration**: Discovers issues through run validation, automatically fixes and enhances robustness
+
+### Validation & Iterative Optimization
+
+After Pipeline generation, AI automatically validates and optimizes:
+
+1. **Run Validation** - Execute Pipeline to check if it succeeds
+2. **Failure Analysis** - If failed, analyze which node failed and why
+3. **Intelligent Fixes** - Common optimization techniques:
+   - Add alternative recognition nodes (add multiple candidates in next list)
+   - Relax OCR matching conditions (use regex or partial matching)
+   - Adjust roi recognition regions
+   - Add wait time (post_delay)
+   - Add intermediate state detection nodes
+4. **Re-validate** - Run again after modifications until it consistently succeeds
+
+If the Pipeline logic itself needs adjustment, AI can re-execute automation operations and combine old and new experiences to generate a more robust Pipeline.
+
+### Example Output
+
+```json
+{
+  "StartTask": {
+    "recognition": "DirectHit",
+    "action": "DoNothing",
+    "next": ["ClickSettings"]
+  },
+  "ClickSettings": {
+    "recognition": "OCR",
+    "expected": "Settings",
+    "action": "Click",
+    "next": ["EnterDisplay"]
+  },
+  "EnterDisplay": {
+    "recognition": "OCR",
+    "expected": "Display",
+    "action": "Click",
+    "next": ["AdjustBrightness"]
+  },
+  "AdjustBrightness": {
+    "recognition": "OCR",
+    "expected": "Brightness",
+    "action": "Swipe",
+    "begin": [200, 500],
+    "end": [400, 500],
+    "duration": 200
+  }
+}
+```
 
 ## Notes
 

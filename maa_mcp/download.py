@@ -155,7 +155,6 @@ def ensure_ocr_resources(ocr_dir: Path | None = None) -> bool:
 
     参数：
     - resource_path: 资源包根目录路径（字符串），可选
-      - 典型路径示例：项目根目录下的 assets/resource
       - 如果不传，默认使用跨平台用户数据目录
 
     返回值：

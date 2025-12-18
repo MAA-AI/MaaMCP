@@ -71,14 +71,14 @@ mcp = FastMCP(
        - 所有操作通过 controller_id 指定目标设备/窗口
        - 可在多个设备间切换操作，实现协同自动化
 
-    屏幕识别策略（重要）：
+    屏幕识别策略：
     - 优先使用 OCR：始终优先调用 ocr() 进行文字识别，OCR 返回结构化文本数据，token 消耗极低
     - 按需使用截图：仅当以下情况时，才调用 screencap() 获取截图，再通过 read_file 读取图片进行视觉识别：
       1. OCR 结果不足以做出决策（如需要识别图标、图像、颜色、布局等非文字信息）
       2. 反复 OCR + 操作后界面状态无预期变化，可能存在弹窗、遮挡或其他视觉异常需要人工判断
     - 图片识别会消耗大量 token，应尽量避免频繁调用
 
-    滚动/翻页策略（重要）：
+    滚动/翻页策略：
     - ADB（Android 设备/模拟器）：优先使用 swipe() 实现页面滚动/列表翻动（scroll() 不支持 ADB）
     - Windows（桌面窗口）：优先使用 scroll() 实现列表/页面滚动（更符合鼠标滚轮语义）；仅在需要“拖拽/滑动手势”时才使用 swipe()
 
@@ -109,6 +109,59 @@ mcp = FastMCP(
     - 严禁在终端中直接执行窗口句柄相关命令（如 GetWindowText、GetWindowTextLength 等）
     - 严禁使用其他第三方库或方法与 ADB 设备或窗口句柄交互
     - 严禁绕过本 MCP 工具自行实现设备控制逻辑
+
+    Pipeline 生成功能：
+    当用户要求生成 Pipeline 时，可以将执行过的自动化操作转换为 MaaFramework Pipeline JSON 格式，
+    以便后续直接运行而无需再次调用 AI。
+
+    生成 Pipeline 的工作流程：
+    1. 先执行完所需的自动化操作
+    2. 调用 get_pipeline_protocol() 获取 Pipeline 协议文档
+    3. 根据文档规范，将执行过的**有效操作**编写为 Pipeline JSON
+    4. 调用 save_pipeline() 保存生成的 Pipeline
+    5. 调用 run_pipeline() 验证 Pipeline 是否正常运行
+    6. 根据运行结果迭代优化 Pipeline（详见下方"Pipeline 验证与迭代优化"）
+
+    生成 Pipeline 的关键原则：
+    - 只保留成功路径：如果操作过程中尝试了多条路径（如先进入 A 菜单没找到目标，
+      返回后又进入 B 菜单才找到），只在 Pipeline 中保留最终成功的路径（B 菜单），
+      不要包含失败的尝试（A 菜单的操作）
+    - 优先使用 OCR 识别：使用文字匹配比坐标匹配更具鲁棒性
+    - 合理设置识别区域：根据 OCR 结果的坐标设置 roi 可以提高识别效率
+    - 节点命名清晰：使用描述性的中文节点名称
+
+    Pipeline 验证与迭代优化（重要）：
+    生成 Pipeline 后，应通过 run_pipeline() 验证其正确性，并根据结果进行迭代优化：
+
+    1. **运行验证**
+       - 调用 run_pipeline(controller_id, pipeline_path) 执行 Pipeline
+       - 检查返回的 TaskDetail：
+         - status 为 succeeded 表示成功
+         - status 为 failed 表示失败，需要分析 nodes 中哪个节点出错
+
+    2. **失败分析与修复**
+       当 Pipeline 运行失败时：
+       - 检查 TaskDetail.nodes 找到失败的节点
+       - 分析失败原因（识别失败、坐标偏移、界面变化等）
+       - 调用 load_pipeline() 读取现有 Pipeline
+       - 修改 Pipeline 内容，常见优化手段：
+         - 增加备选识别节点（在 next 列表中添加多个候选）
+         - 放宽 OCR 匹配条件（使用正则表达式或部分匹配）
+         - 调整 roi 识别区域
+         - 增加 post_delay 等待时间
+         - 添加中间状态检测节点
+       - 调用 save_pipeline() 保存修改（指定原文件路径覆盖更新）
+
+    3. **重新执行自动化**
+       如果通过分析发现 Pipeline 逻辑本身需要调整（如操作路径有误），可以：
+       - 重新执行一遍自动化循环
+       - 将新的操作经验与之前的结合
+       - 生成更完善的 Pipeline
+
+    4. **迭代直到成功**
+       - 反复执行"运行→分析→修复→运行"循环
+       - 直到 Pipeline 稳定运行成功
+       - 建议多次验证以确保鲁棒性
     """,
 )
 
