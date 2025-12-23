@@ -149,6 +149,28 @@ MaaMCP will automatically:
 3. Auto-download and load OCR resources (on first use)
 4. Execute recognition and operation tasks
 
+## Prompt words
+
+If you want AI to complete automation tasks quickly and efficiently without seeing detailed explanations during the running process, you can add the following content to your prompt:
+
+```
+# Role: UI Automation Agent
+
+## Workflow Optimization Rules
+1. **Minimize Round-Trips**: Your goal is to complete tasks with the fewest interactions.
+2. **Critical Pattern**: When it comes to form/chat input, you must follow the **[Click Focus -> Input Text -> Send Key]** atomic operation sequence.
+   - 🚫 Wrong way: Click first, wait for results; then Input, wait for results; then Press Enter.
+   - ✅ Correct way: After `click`, without waiting for a return, directly append `input_text` and `click_key` in the same `tool_calls` list based on logical inference.
+
+## Communication Style
+- **NO YAPPING**: Don't repeat user instructions, don't explain your steps.
+- **Direct Execution**: Receive instruction -> (internal thinking) -> directly output JSON tool calls.
+```
+
+### Performance Recommendations
+
+For the fastest running speed, it is recommended to use **Flash version** of large language models (such as Claude 3 Flash), which can significantly improve response speed while maintaining high intelligence levels.
+
 ## Workflow
 
 MaaMCP follows a streamlined operational workflow with multi-device/window coordination support:
