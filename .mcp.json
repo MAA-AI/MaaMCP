@@ -4,7 +4,7 @@
       "command": "python",
       "args": [
         "-m",
-        "maa_mcp.pipeline_server"
+        "maa_mcp"
       ]
     }
   }
