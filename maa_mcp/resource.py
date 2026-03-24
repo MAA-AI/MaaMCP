@@ -1,5 +1,6 @@
 from typing import Optional
 
+from loguru import logger
 from maa.controller import Controller
 from maa.resource import Resource
 from maa.tasker import Tasker
@@ -38,19 +39,20 @@ def add_resource_path(path: str):
     # 先确保默认路径已加载
     if not _default_loaded:
         default_path = str(get_resource_dir())
-        resource.post_bundle(default_path)
+        if not resource.post_bundle(default_path).wait().succeeded:
+            logger.warning(f"加载默认资源包失败: {default_path}")
         _default_loaded = True
 
     # 只加载新增的自定义路径（去重）
     if path not in _loaded_paths:
-        resource.post_bundle(str(path))
+        if not resource.post_bundle(str(path)).wait().succeeded:
+            logger.warning(f"加载自定义资源包失败: {path}")
         _loaded_paths.append(path)
 
 
 def clear_resource():
-    """清除全局 Resource 缓存，强制重新创建。"""
-    global _resource_paths, _default_loaded, _loaded_paths
-    _resource_paths.clear()
+    """清除全局 Resource 缓存，强制重新创建（保留已配置的资源路径）。"""
+    global _default_loaded, _loaded_paths
     _default_loaded = False
     _loaded_paths.clear()
     object_registry.unregister(_GLOBAL_RESOURCE_KEY)
@@ -72,11 +74,13 @@ def get_or_create_resource() -> Optional[Resource]:
 
         # 首次创建时加载所有路径
         default_path = str(get_resource_dir())
-        resource.post_bundle(default_path)
+        if not resource.post_bundle(default_path).wait().succeeded:
+            logger.warning(f"加载默认资源包失败: {default_path}")
         _default_loaded = True
 
         for path in _resource_paths:
-            resource.post_bundle(str(path))
+            if not resource.post_bundle(str(path)).wait().succeeded:
+                logger.warning(f"加载自定义资源包失败: {path}")
             _loaded_paths.append(path)
 
     return resource
