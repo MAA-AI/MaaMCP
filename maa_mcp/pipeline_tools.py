@@ -18,7 +18,7 @@ from maa.tasker import TaskDetail
 
 from maa_mcp.core import mcp
 from maa_mcp.paths import get_data_dir
-from maa_mcp.resource import get_or_create_resource, get_or_create_tasker
+from maa_mcp.resource import get_or_create_resource, get_or_create_tasker, add_resource_path
 
 
 # Pipeline 协议文档（精简版，包含 AI 生成 Pipeline 所需的关键信息）
@@ -391,10 +391,51 @@ def save_pipeline(
     - controller_id: 控制器 ID，由 connect_adb_device() 或 connect_window() 返回
     - pipeline_path: Pipeline JSON 文件路径
     - entry: 入口节点名称（可选），不指定则使用 Pipeline 中的第一个节点
+    - resource_path: 资源目录路径（可选），用于指定 Pipeline 所需的资源文件路径。
+      如果不指定，则使用 MaaMCP 默认的资源目录。
+      当 Pipeline 需要使用外部资源（如 MaaGC 的资源）时，需要指定此参数。
 
     返回值：
-    - 成功：返回 TaskDetail 对象，包含 task_id、entry、status、nodes 等执行信息
+    - 成功：返回 dict 对象，包含以下字段：
+      - task_id: 任务 ID
+      - entry: 入口节点名称
+      - status: 执行状态字符串（"succeeded" | "failed" | "running" | "pending" | "done"）
+      - node_count: 执行的节点数量
+      - nodes: 节点详情列表，每个节点包含：
+        - name: 节点名称
+        - recognition: 识别结果（如果有），包含 all_results 列表
+          - all_results: 识别到的目标列表，每项包含 box（坐标）和 score（置信度）
     - 失败：返回错误信息字符串
+
+    判断识别结果：
+    - 检查 nodes 是否包含 recognition.all_results：
+      - 有内容 = 识别成功，找到了目标
+      - 无内容或 nodes 为空 = 识别失败，未找到目标
+    - box 格式：[x, y, width, height]
+    - score 范围：0-1，越高越准确
+
+    示例返回值（识别成功）：
+    {
+      "task_id": 200000001,
+      "entry": "BackButton_500ms",
+      "status": "succeeded",
+      "node_count": 1,
+      "nodes": [{
+        "name": "BackButton_500ms",
+        "recognition": {
+          "all_results": [{"box": [653, 7, 46, 40], "score": 0.999726}]
+        }
+      }]
+    }
+
+    示例返回值（识别失败）：
+    {
+      "task_id": 200000002,
+      "entry": "BackButton_500ms",
+      "status": "failed",
+      "node_count": 1,
+      "nodes": [{"name": ""}]
+    }
 
     说明：
     此函数会先加载 Pipeline 文件到 Resource，然后通过 Tasker 执行任务。
@@ -406,7 +447,12 @@ def run_pipeline(
     controller_id: str,
     pipeline_path: str,
     entry: Optional[str] = None,
+    resource_path: Optional[str] = None,
 ) -> TaskDetail | str:
+    # 如果传入了 resource_path，添加它以便 get_or_create_resource 加载该路径
+    if resource_path:
+        add_resource_path(resource_path)
+
     # 检查文件是否存在
     path = Path(pipeline_path)
     if not path.exists():
@@ -450,7 +496,44 @@ def run_pipeline(
     if not task_detail:
         return "任务执行失败，无法获取执行详情"
 
-    return task_detail
+    # 解析状态为易读文字
+    status = task_detail.status
+    if status.succeeded:
+        status_text = "succeeded"
+    elif status.failed:
+        status_text = "failed"
+    elif status.running:
+        status_text = "running"
+    elif status.pending:
+        status_text = "pending"
+    elif status.done:
+        status_text = "done"
+    else:
+        status_text = str(status)
+
+    # 获取节点详情
+    nodes_info = []
+    if hasattr(task_detail, 'nodes') and task_detail.nodes:
+        for node in task_detail.nodes:
+            node_info = {}
+            if hasattr(node, 'recognition') and node.recognition:
+                node_info["recognition"] = {
+                    "all_results": getattr(node.recognition, 'all_results', None)
+                }
+            if hasattr(node, 'name'):
+                node_info["name"] = node.name
+            nodes_info.append(node_info)
+
+    result = {
+        "task_id": task_detail.task_id,
+        "entry": task_detail.entry,
+        "status": status_text,
+        "node_count": len(task_detail.node_id_list) if hasattr(task_detail, 'node_id_list') else 0,
+    }
+    if nodes_info:
+        result["nodes"] = nodes_info
+
+    return result
 
 
 """

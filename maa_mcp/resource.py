@@ -11,23 +11,74 @@ from maa_mcp.paths import get_resource_dir
 # 全局资源 ID 的固定键名
 _GLOBAL_RESOURCE_KEY = "_global_resource"
 
+# 资源路径列表（按加载顺序，后加载的会覆盖先加载的同名资源）
+_resource_paths: list[str] = []
+# 记录默认路径是否已加载
+_default_loaded: bool = False
+# 记录已加载的自定义路径（用于去重）
+_loaded_paths: list[str] = []
+
+
+def add_resource_path(path: str):
+    """
+    添加资源路径，后加载的会覆盖先加载的同名资源。
+    添加后会立即加载该路径到已创建的 Resource。
+    """
+    global _resource_paths, _default_loaded, _loaded_paths
+
+    if path not in _resource_paths:
+        _resource_paths.append(path)
+
+    resource: Resource | None = object_registry.get(_GLOBAL_RESOURCE_KEY)
+    if not resource:
+        # Resource 还不存在，等 get_or_create_resource 时一起加载
+        return
+
+    # Resource 已存在，立即加载新路径
+    # 先确保默认路径已加载
+    if not _default_loaded:
+        default_path = str(get_resource_dir())
+        resource.post_bundle(default_path)
+        _default_loaded = True
+
+    # 只加载新增的自定义路径（去重）
+    if path not in _loaded_paths:
+        resource.post_bundle(str(path))
+        _loaded_paths.append(path)
+
+
+def clear_resource():
+    """清除全局 Resource 缓存，强制重新创建。"""
+    global _resource_paths, _default_loaded, _loaded_paths
+    _resource_paths.clear()
+    _default_loaded = False
+    _loaded_paths.clear()
+    object_registry.unregister(_GLOBAL_RESOURCE_KEY)
+
 
 def get_or_create_resource() -> Optional[Resource]:
     """
     获取或创建全局唯一的 Resource 实例。
     注意：调用此函数前应确保 OCR 资源已存在，否则可能加载失败。
+
+    Resource 会按顺序加载多个资源路径，后加载的会覆盖先加载的同名资源。
     """
+    global _resource_paths, _default_loaded, _loaded_paths
+
     resource: Resource | None = object_registry.get(_GLOBAL_RESOURCE_KEY)
-    if resource:
-        return resource
+    if not resource:
+        resource = Resource()
+        object_registry.register_by_name(_GLOBAL_RESOURCE_KEY, resource)
 
-    resource_path = get_resource_dir()
+        # 首次创建时加载所有路径
+        default_path = str(get_resource_dir())
+        resource.post_bundle(default_path)
+        _default_loaded = True
 
-    resource = Resource()
-    if not resource.post_bundle(str(resource_path)).wait().succeeded:
-        return None
+        for path in _resource_paths:
+            resource.post_bundle(str(path))
+            _loaded_paths.append(path)
 
-    object_registry.register_by_name(_GLOBAL_RESOURCE_KEY, resource)
     return resource
 
 
