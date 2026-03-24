@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Optional
 from lzstring import LZString
 
-from maa.tasker import TaskDetail
 
 from maa_mcp.core import mcp
 from maa_mcp.paths import get_data_dir
@@ -448,7 +447,7 @@ def run_pipeline(
     pipeline_path: str,
     entry: Optional[str] = None,
     resource_path: Optional[str] = None,
-) -> TaskDetail | str:
+) -> dict | str:
     # 如果传入了 resource_path，添加它以便 get_or_create_resource 加载该路径
     if resource_path:
         add_resource_path(resource_path)
