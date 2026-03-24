@@ -24,6 +24,7 @@ import maa_mcp.vision
 import maa_mcp.control
 import maa_mcp.utils
 import maa_mcp.resource
+import maa_mcp.pipeline_tools
 
 # 导入 Pipeline 子模块
 from dataclasses import dataclass
