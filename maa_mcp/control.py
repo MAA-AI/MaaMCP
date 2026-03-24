@@ -109,7 +109,14 @@ def double_click(
     - 失败：返回 False
 
     说明：
-    坐标系统以屏幕左上角为原点 (0, 0)。duration 参数控制滑动速度，数值越大滑动越慢。
+    - 坐标系统以屏幕左上角为原点 (0, 0)
+    - duration 参数控制滑动速度，数值越大滑动越慢
+    - 起点、终点坐标由 AI 根据当前 OCR 识别结果和场景自行计算决定
+
+    预设 duration 值（建议直接使用），正常情况下默认用slow速度滑动：
+
+    - slow（慢速）: duration=3000，适合长距离拖拽、滚动翻页
+    - fast（快速）: duration=1500，适合短距离精确滑动、点击式滑动
 """,
 )
 def swipe(
@@ -199,7 +206,9 @@ def click_key(controller_id: str, key: int, duration: int = 50) -> bool:
     return controller.post_key_up(key).wait().succeeded
 
 
-@mcp.tool(name="keyboard_shortcut", description="""
+@mcp.tool(
+    name="keyboard_shortcut",
+    description="""
     在设备屏幕上执行键盘快捷键操作。
 
     参数：
@@ -220,7 +229,8 @@ def click_key(controller_id: str, key: int, duration: int = 50) -> bool:
       - Left Windows: 91 (0x5B)
 
     注意：该方法仅对 Windows 窗口控制器，且在 Seize 控制方式下有效，其他控制方式不支持。
-""")
+""",
+)
 def keyboard_shortcut(
     controller_id: str, modifiers: list[int], primary_key: int, duration: int = 50
 ) -> Union[bool, str]:
@@ -233,7 +243,10 @@ def keyboard_shortcut(
     if info:
         if info.controller_type == ControllerType.ADB:
             return "keyboard_shortcut 不支持 ADB 控制器，该方法仅适用于 Windows 窗口控制器。请使用 click_key 进行单个按键操作。"
-        if info.controller_type == ControllerType.WIN32 and info.keyboard_method != "Seize":
+        if (
+            info.controller_type == ControllerType.WIN32
+            and info.keyboard_method != "Seize"
+        ):
             return f"keyboard_shortcut 仅支持 Seize 键盘模式，当前为 {info.keyboard_method}。可对同一窗口调用 connect_window(keyboard_method='Seize') 获取新 controller_id，原 controller_id 仍可用于其他操作。"
 
     for modifier in modifiers:

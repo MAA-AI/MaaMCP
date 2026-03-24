@@ -2,7 +2,7 @@ import atexit
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from maa.toolkit import Toolkit
 
@@ -30,6 +30,8 @@ class ControllerInfo:
     """控制器信息，用于记录控制器类型和配置"""
 
     controller_type: ControllerType
+    # 连接参数，用于在子进程中重建控制器
+    connection_params: Dict[str, Any]
     # Win32 专用：键盘输入方式
     keyboard_method: Optional[str] = None
 
@@ -55,23 +57,75 @@ mcp = FastMCP(
     - 每个设备/窗口拥有独立的控制器 ID（controller_id）
     - 通过在操作时指定不同的 controller_id 实现多设备协同自动化
 
-    标准工作流程：
-    1. 设备/窗口发现与连接
+    ⭐ 双模式运行支持：
+    - 串行模式（流程 1 + 2）：传统的同步执行方式，一个指令完成后再执行下一个
+    - 流水线模式（流程 1 + 3）：多线程异步执行方式，后台持续采集屏幕信息，主线程专注于决策和操作
+
+    ========================
+    标准工作流程
+    ========================
+
+    1. 设备/窗口发现与连接（必选，两种模式通用）
        - 调用 find_adb_device_list() 扫描可用的 ADB 设备
        - 调用 find_window_list() 扫描可用的 Windows 窗口
        - 若发现多个设备/窗口，需向用户展示列表并等待用户选择需要操作的目标
        - 使用 connect_adb_device(device_name) 或 connect_window(window_name) 建立连接
        - 可连接多个设备/窗口，每个连接返回独立的控制器 ID
 
-    2. 自动化执行循环
+    2. 串行自动化执行循环（流程 1 之后选择此流程进入串行模式）
+       ⭐ 标准工作循环：截图(screencap) → OCR识别(ocr) → 分析内容 → 执行操作(click/swipe等) → 重复直到完成
        - 调用 ocr(controller_id) 对指定设备进行屏幕截图和 OCR 识别
-       - 首次使用时，如果 OCR 模型文件不存在，ocr() 会返回提示信息，需要调用 check_and_download_ocr() 下载资源
+       - 首次使用时，如果 OCR 模型文件不存在, ocr() 会返回提示信息，需要调用 check_and_download_ocr() 下载资源
        - 下载完成后即可正常使用 OCR 功能，后续调用无需再次下载
-       - 根据识别结果调用 click()、double_click()、scroll()、swipe() 等执行相应操作
+       - 根据 OCR 识别结果中的文字和坐标，执行 click()、double_click()、scroll()、swipe() 等操作
+       - 操作后等待界面刷新(约 1 秒)，然后再次调用 ocr() 获取新界面状态
+       - 重复以上循环，直到完成用户指定的任务
        - 所有操作通过 controller_id 指定目标设备/窗口
        - 可在多个设备间切换操作，实现协同自动化
+       - 特点：每次操作需等待 OCR 完成，适合简单任务或对实时性要求不高的场景
 
-    屏幕识别策略：
+       ⚠️ 重要提醒：
+       - 模拟器（如 MuMu）必须使用 ADB 方式连接（find_adb_device_list → connect_adb_device），
+         使用 Win32 窗口方式连接（find_window_list → connect_window）会导致截图黑屏
+       - 普通 Windows 窗口应使用 find_window_list → connect_window 连接
+
+    3. 流水线自动化执行（流程 1 之后选择此流程进入多线程流水线模式）
+       ⭐ 适用场景：需要高频屏幕监控、实时响应的自动化任务
+
+       3.1 启动流水线
+           - 调用 start_pipeline(controller_id) 启动指定控制器的流水线
+           - 流水线会在后台启动独立线程，按固定频率自动截图并缓存图片路径
+           - 截图路径会自动推送到消息队列中
+           - 启动流水线后，等待约 1 秒让流水线进行初始缓存
+
+       3.2 获取流水线状态和截图
+           - 调用 get_pipeline_status() 检测流水线运行状态和待处理消息数量
+           - 如果有新消息，调用 get_new_messages() 获取最新的截图路径
+           - 消息包含 type（固定为 "screenshot"）、image_path（截图文件路径）、timestamp、frame_id
+
+       3.3 分析截图并执行操作
+           - 读取 image_path 中的图片内容，进行视觉分析
+           - 根据图片内容判断是否需要执行 OCR（调用 ocr 工具获取文字信息）
+           - 根据分析结果调用 click()、double_click()、scroll()、swipe() 等执行相应操作
+           - 所有操作通过 controller_id 指定目标设备/窗口
+           - 可在多个设备间切换操作，实现协同自动化
+           - 操作完成后继续循环 3.2 和 3.3，直到任务完成
+
+       3.4 停止流水线
+           - 任务完成后，调用 stop_pipeline() 停止流水线
+           - 释放后台线程资源
+
+       流水线模式优势：
+           - 后台持续截图，大模型可直接查看完整画面进行决策
+           - 大模型可根据图片内容自行决定是否需要 OCR、具体 OCR 哪个区域
+           - 支持高频屏幕监控，不错过任何界面变化
+           - 适合需要快速响应的实时自动化任务
+           - 消息队列机制，支持异步处理和历史数据查询
+
+    ========================
+    屏幕识别策略（重要）
+    ========================
+
     - 优先使用 OCR：始终优先调用 ocr() 进行文字识别，OCR 返回结构化文本数据，token 消耗极低
     - 按需使用截图：仅当以下情况时，才调用 screencap() 获取截图，再通过 read_file 读取图片进行视觉识别：
       1. OCR 结果不足以做出决策（如需要识别图标、图像、颜色、布局等非文字信息）
@@ -93,7 +147,10 @@ mcp = FastMCP(
 
     截图异常（画面为空、纯黑、花屏等）：
       - 多尝试几次（2~3次）确认是否为偶发问题，不要一次失败就切换
-      - 若持续异常，按优先级切换截图方式重新连接：
+      - ⚠️ 重要：如果目标是模拟器（如 MuMu），画面黑屏是正常的！
+        模拟器必须使用 ADB 方式连接：调用 find_adb_device_list() → connect_adb_device()
+        使用 Win32 窗口方式连接模拟器会持续黑屏，切换截图方式无法解决
+      - 若持续异常且目标是普通 Windows 窗口（非模拟器），按优先级切换截图方式重新连接：
         FramePool → PrintWindow → GDI → DXGI_DesktopDup_Window → ScreenDC
       - 最后手段：DXGI_DesktopDup（截取整个桌面，触控坐标会不正确，仅用于排查问题）
 

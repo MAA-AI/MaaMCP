@@ -67,6 +67,16 @@ def get_screenshots_dir() -> Path:
     return get_data_dir() / "screenshots"
 
 
+def get_logs_dir() -> Path:
+    """
+    获取日志目录路径
+
+    Returns:
+        日志目录路径 (data_dir/logs)
+    """
+    return get_data_dir() / "logs"
+
+
 def ensure_dirs() -> None:
     """
     确保所有必要的目录存在
@@ -76,6 +86,7 @@ def ensure_dirs() -> None:
         get_model_dir(),
         get_ocr_dir(),
         get_screenshots_dir(),
+        get_logs_dir(),
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)

@@ -466,3 +466,6 @@ tools/ImageCropper/**/*.png
 
 config
 debug
+output
+.claude/skills
+comment.txt

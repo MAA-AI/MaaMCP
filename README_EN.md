@@ -30,6 +30,7 @@ MaaMCP is a Model Context Protocol server that exposes MaaFramework's powerful a
 - 🖥️ **Windows Automation** - Control Windows desktop applications
   - 🎯 **Background Operation** - Screenshots and controls on Windows run in the background without occupying your mouse or keyboard, allowing you to continue using your computer for other tasks
 - 🔗 **Multi-Device Coordination** - Control multiple devices/windows simultaneously for cross-device automation
+- ⚡ **Dual-Mode Operation** - Serial mode (synchronous execution) and Pipeline mode (background continuous screenshots), adapting to different scenarios
 - 👁️ **Smart Recognition** - Use OCR to recognize on-screen text
 - 🎯 **Precise Operations** - Execute clicks, swipes, text input, key presses, and more
 - 📸 **Screenshots** - Capture real-time screenshots for visual analysis
@@ -47,8 +48,8 @@ Talk is cheap, see: **[🎞️ Bilibili Video Demo](https://www.bilibili.com/vid
 
 ### 👀 Screen Recognition
 
-- `screencap_and_ocr` - Optical Character Recognition (efficient, recommended for priority use, OCR model auto-downloads on first use)
-- `screencap_only` - Screenshot capture, then processed by large model vision (use as needed, high token cost)
+- `ocr` - Optical Character Recognition (efficient, recommended for priority use, OCR model auto-downloads on first use)
+- `screencap` - Screenshot capture (use as needed, high token cost)
 
 ### 🎮 Device Control
 
@@ -63,6 +64,13 @@ Talk is cheap, see: **[🎞️ Bilibili Video Demo](https://www.bilibili.com/vid
 - `keyboard_shortcut` - Keyboard shortcuts
   - Supports key combinations: Ctrl+C, Ctrl+V, Alt+Tab, etc.
 - `scroll` - Mouse wheel (Windows only)
+
+### ⚡ Pipeline Mode (Multi-threaded Background Monitoring)
+
+- `start_pipeline` - Start background monitoring pipeline, continuously captures screenshots and caches image paths
+- `stop_pipeline` - Stop pipeline
+- `get_new_messages` - Get new screenshot paths cached by pipeline
+- `get_pipeline_status` - Get pipeline running status
 
 ### 📝 Pipeline Generation & Execution
 
@@ -149,42 +157,75 @@ MaaMCP will automatically:
 3. Auto-download and load OCR resources (on first use)
 4. Execute recognition and operation tasks
 
-## Prompt words
-
-If you want AI to complete automation tasks quickly and efficiently without seeing detailed explanations during the running process, you can add the following content to your prompt:
-
-```
-# Role: UI Automation Agent
-
-## Workflow Optimization Rules
-1. **Minimize Round-Trips**: Your goal is to complete tasks with the fewest interactions.
-2. **Critical Pattern**: When it comes to form/chat input, you must follow the **[Click Focus -> Input Text -> Send Key]** atomic operation sequence.
-   - 🚫 Wrong way: Click first, wait for results; then Input, wait for results; then Press Enter.
-   - ✅ Correct way: After `click`, without waiting for a return, directly append `input_text` and `click_key` in the same `tool_calls` list based on logical inference.
-
-## Communication Style
-- **NO YAPPING**: Don't repeat user instructions, don't explain your steps.
-- **Direct Execution**: Receive instructions -> (internal thinking) -> directly output JSON tool calls.
-- **Direct Execution**: Receive instruction -> (internal thinking) -> directly output JSON tool calls.
-```
-
-### Performance Recommendations
-
-For the fastest running speed, it is recommended to use the **Flash version** of a large language model (such as Claude 3 Flash), which can significantly improve response speed while maintaining high intelligence levels.
-
 ## Workflow
 
-MaaMCP follows a streamlined operational workflow with multi-device/window coordination support:
+MaaMCP follows a streamlined operational workflow with multi-device/window coordination support and two operation modes:
 
 ```mermaid
 graph LR
     A[Scan Devices] --> B[Establish Connection]
-    B --> C[Execute Automation]
+    B --> C1[Serial Mode]
+    B --> C2[Pipeline Mode]
+    C1 --> D[Execute Automation]
+    C2 --> D
 ```
 
 1. **Scan** - Use `find_adb_device_list` or `find_window_list`
 2. **Connect** - Use `connect_adb_device` or `connect_window` (can connect multiple devices/windows, each gets a unique controller ID)
 3. **Operate** - Execute OCR, click, swipe, etc. on multiple devices/windows by specifying different controller IDs (OCR resources auto-download on first use)
+
+### Dual-Mode Operation
+
+MaaMCP supports two operation modes, allowing flexible selection based on task requirements:
+
+#### Serial Mode (Default)
+
+Traditional synchronous execution, completing one instruction before executing the next:
+
+```
+OCR Recognition → Analyze Results → Execute Operation → OCR Recognition → ...
+```
+
+**Suitable for**: Simple tasks, scenarios with low real-time requirements
+
+#### Pipeline Mode (Multi-threaded Background Monitoring)
+
+Multi-threaded asynchronous execution, background thread continuously captures screen information while main thread focuses on decision-making and operations:
+
+```mermaid
+graph LR
+    subgraph Background Thread
+        S1[Continuous Screenshots] --> S2[Cache Image Paths]
+        S2 --> S3[Push to Message Queue]
+        S3 --> S1
+    end
+    subgraph Main Thread
+        M1[Get Screenshot Path] --> M2[Visual Analysis]
+        M2 --> M3[Decide if OCR Needed]
+        M3 --> M4[Execute Operation]
+        M4 --> M1
+    end
+```
+
+**Workflow**:
+
+1. **Start Pipeline** - Call `start_pipeline(controller_id)` to start background monitoring
+2. **Get Screenshots** - Call `get_pipeline_status()` to check status, `get_new_messages()` to get screenshot paths
+3. **Analyze & Execute** - Read images for visual analysis, call OCR as needed, execute clicks and other operations
+4. **Stop Pipeline** - Call `stop_pipeline()` to release resources when task is complete
+
+**Advantages**:
+- Continuous background screenshots, AI can directly view complete screen for decision-making
+- AI can decide whether OCR is needed and which specific regions to OCR based on image content
+- Supports high-frequency screen monitoring, never misses interface changes
+- Suitable for real-time automation tasks requiring fast response
+- Message queue mechanism supports asynchronous processing
+
+**Usage Example**:
+
+```text
+Please use MaaMCP tools to connect to my device, use pipeline mode to monitor the screen, and automatically click confirm when a specific popup appears.
+```
 
 ## Pipeline Generation
 

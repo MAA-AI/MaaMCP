@@ -125,9 +125,17 @@ def connect_window(
     if not window_controller.post_connection().wait().succeeded:
         return None
     controller_id = object_registry.register(window_controller)
+
+    connection_params = {
+        "hwnd": window.hwnd,
+        "screencap_method": screencap_method,
+        "mouse_method": mouse_method,
+        "keyboard_method": keyboard_method,
+    }
+
     controller_info_registry[controller_id] = ControllerInfo(
         controller_type=ControllerType.WIN32,
+        connection_params=connection_params,
         keyboard_method=keyboard_method,
     )
     return controller_id
-

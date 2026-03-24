@@ -45,6 +45,7 @@ dependencies = [
     "fastmcp>=2.0.0",
     "opencv-python>=4.0.0",
     "platformdirs>=4.0.0",
+    "loguru>=0.7.0",
     "lzstring>=1.0.4",
 ]
 
@@ -56,6 +57,9 @@ Issues = "https://github.com/MistEO/MaaMCP/issues"
 
 [project.scripts]
 maa-mcp = "maa_mcp.__main__:main"
+maa_mcp = "maa_mcp.__main__:main"
+maa-mcp-server = "maa_mcp.pipeline_server:main"
+maa_mcp_server = "maa_mcp.pipeline_server:main"
 
 [tool.hatch.version]
 source = "vcs"

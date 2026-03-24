@@ -30,6 +30,7 @@ MaaMCP 是一个 MCP 服务器，将 MaaFramework 的强大自动化能力通过
 - 🖥️ **Windows 自动化** - 控制 Windows 桌面应用程序
   - 🎯 **后台操作** - Windows 上的截图与控制均在后台运行，不占用鼠标键盘，您可以继续使用电脑做其他事情
 - 🔗 **多设备协同** - 同时控制多个设备/窗口，实现跨设备自动化
+- ⚡ **双模式运行** - 串行模式（同步执行）和流水线模式（后台持续截图），适应不同场景需求
 - 👁️ **智能识别** - 使用 OCR 识别屏幕文字内容
 - 🎯 **精准操作** - 执行点击、滑动、文本输入、按键等操作
 - 📸 **屏幕截图** - 获取实时屏幕截图进行视觉分析
@@ -47,8 +48,8 @@ Talk is cheap, 请看: **[🎞️ Bilibili 视频演示](https://www.bilibili.co
 
 ### 👀 屏幕识别
 
-- `screencap_and_ocr` - 光学字符识别（高效，推荐优先使用）
-- `screencap_only` - 屏幕截图，然后由大模型视觉处理（按需使用，token 开销大）
+- `ocr` - 光学字符识别（高效，推荐优先使用）
+- `screencap` - 屏幕截图（按需使用，token 开销大）
 
 ### 🎮 设备控制
 
@@ -63,6 +64,13 @@ Talk is cheap, 请看: **[🎞️ Bilibili 视频演示](https://www.bilibili.co
 - `keyboard_shortcut` - 键盘快捷键
   - 支持组合键：Ctrl+C、Ctrl+V、Alt+Tab 等
 - `scroll` - 鼠标滚轮（仅 Windows）
+
+### ⚡ 流水线模式（多线程后台监控）
+
+- `start_pipeline` - 启动后台监控流水线，持续截图并缓存图片路径
+- `stop_pipeline` - 停止流水线
+- `get_new_messages` - 获取流水线缓存的新截图路径
+- `get_pipeline_status` - 获取流水线运行状态
 
 ### 📝 Pipeline 生成与运行
 
@@ -104,6 +112,36 @@ pip install maa-mcp
     ```bash
     pip install -e .
     ```
+
+### 运行方式
+
+MaaMCP 提供两种运行模式：
+
+#### 标准服务器（串行模式）
+
+传统的同步执行方式，适合简单任务：
+
+```bash
+# 已安装包的情况
+maa-mcp
+
+# 从源码开发运行
+python -m maa_mcp
+```
+
+#### 流水线服务器（多线程后台监控）
+
+多线程异步执行方式，适合需要高频屏幕监控的实时自动化任务：
+
+```bash
+# 已安装包的情况
+maa-mcp-server
+
+# 从源码开发运行
+python -m maa_mcp.pipeline_server
+```
+
+两种服务器的功能完全一致，均支持串行模式和流水线模式的自动化流程。区别在于流水线服务器内部使用独立的后台线程持续采集屏幕截图，可根据任务需求灵活选择。
 
 ### 配置客户端
 
@@ -157,41 +195,76 @@ MaaMCP 会自动：
 3. 自动下载并加载 OCR 资源
 4. 执行识别和操作任务
 
-## 大模型提示词
-
-如果你希望 AI 能够快速、高效地完成自动化任务，而不希望看到运行过程中的详细解释，可以将以下内容添加到你的提示词（Prompt）中：
-
-```
-# Role: UI Automation Agent
-
-## Workflow Optimization Rules
-1. **Minimize Round-Trips**: 你的目标是以最少的交互次数完成任务。
-2. **Critical Pattern**: 当涉及到表单/聊天输入时，必须遵循 **[Click Focus -> Input Text -> Send Key]** 的原子化操作序列。
-   - 🚫 错误做法：先 Click，等待结果；再 Input，等待结果；再 Press Enter。
-   - ✅ 正确做法：在 `click` 之后，无需等待返回，直接在同一个 `tool_calls` 列表中根据逻辑推断追加 `input_text` 和 `click_key`。
-
-## Communication Style
-- **NO YAPPING**: 不要复述用户的指令，不要解释你的步骤。
-- **Direct Execution**: 接收指令 -> (内部思考) -> 直接输出 JSON 工具调用。
-```
-
-### 性能建议
-
-为了获得最快的运行速度，建议使用 **Flash 版本**的大语言模型（如 Claude 3 Flash），这些模型在保持较高智能水平的同时，能够显著提升响应速度。
-
 ## 工作流程
 
-MaaMCP 遵循简洁的操作流程，支持多设备/多窗口协同工作：
+MaaMCP 遵循简洁的操作流程，支持多设备/多窗口协同工作，并提供两种运行模式：
 
 ```mermaid
 graph LR
     A[扫描设备] --> B[建立连接]
-    B --> C[执行自动化操作]
+    B --> C1[串行模式]
+    B --> C2[流水线模式]
+    C1 --> D[执行自动化操作]
+    C2 --> D
 ```
 
 1. **扫描** - 使用 `find_adb_device_list` 或 `find_window_list`
 2. **连接** - 使用 `connect_adb_device` 或 `connect_window`（可连接多个设备/窗口，获得多个控制器 ID）
 3. **操作** - 通过指定不同的控制器 ID，对多个设备/窗口执行 OCR、点击、滑动等自动化操作
+
+### 双模式运行
+
+MaaMCP 支持两种运行模式，可根据任务需求灵活选择：
+
+#### 串行模式（默认）
+
+传统的同步执行方式，一个指令完成后再执行下一个：
+
+```
+OCR识别 → 分析结果 → 执行操作 → OCR识别 → ...
+```
+
+**适用场景**：简单任务、对实时性要求不高的场景
+
+#### 流水线模式（多线程后台监控）
+
+多线程异步执行方式，后台持续采集屏幕信息，主线程专注于决策和操作：
+
+```mermaid
+graph LR
+    subgraph 后台线程
+        S1[持续截图] --> S2[缓存图片路径]
+        S2 --> S3[推送到消息队列]
+        S3 --> S1
+    end
+    subgraph 主线程
+        M1[获取截图路径] --> M2[视觉分析]
+        M2 --> M3[决定是否OCR]
+        M3 --> M4[执行操作]
+        M4 --> M1
+    end
+```
+
+**工作流程**：
+
+1. **启动流水线** - 调用 `start_pipeline(controller_id)` 启动后台监控
+2. **获取截图** - 调用 `get_pipeline_status()` 检查状态，`get_new_messages()` 获取截图路径
+3. **分析执行** - 读取图片进行视觉分析，根据需要调用 OCR，执行点击等操作
+4. **停止流水线** - 任务完成后调用 `stop_pipeline()` 释放资源
+
+**优势**：
+
+- 后台持续截图，AI 可直接查看完整画面进行决策
+- AI 可根据图片内容自行决定是否需要 OCR、具体 OCR 哪个区域
+- 支持高频屏幕监控，不错过任何界面变化
+- 适合需要快速响应的实时自动化任务
+- 消息队列机制，支持异步处理
+
+**使用示例**：
+
+```text
+请用 MaaMCP 工具连接我的设备，使用流水线模式监控屏幕，当出现特定弹窗时自动点击确认。
+```
 
 ## Pipeline 生成功能
 
@@ -292,9 +365,9 @@ Pipeline 生成后，AI 会自动进行验证和优化：
 
 首次使用时，会自动下载 OCR 模型文件。但可能出现下载失败等情况，请检查数据目录：
 
-- Windows: `C:\Users\<用户名>\AppData\Local\MaaXYZ\MaaMCP\resource\model\ocr\`
-- macOS: `~/Library/Application Support/MaaXYZ/MaaMCP/resource/model/ocr/`
-- Linux: `~/.local/share/MaaXYZ/MaaMCP/resource/model/ocr/`
+- Windows: `C:\Users\<用户名>\AppData\Local\MaaMCP\resource\model\ocr\`
+- macOS: `~/Library/Application Support/MaaMCP/resource/model/ocr/`
+- Linux: `~/.local/share/MaaMCP/resource/model/ocr/`
 
 1. 检查上述目录中是否有模型文件（`det.onnx`, `rec.onnx`, `keys.txt`）
 2. 检查 `model/download.log` 中是否出现资源下载异常
@@ -304,9 +377,9 @@ Pipeline 生成后，AI 会自动进行验证和优化：
 
 提交问题时，请提供日志文件，日志文件路径如下：
 
-- Windows: `C:\Users\<用户名>\AppData\Local\MaaXYZ\MaaMCP\debug\maa.log`
-- macOS: `~/Library/Application Support/MaaXYZ/MaaMCP/debug/maa.log`
-- Linux: `~/.local/share/MaaXYZ/MaaMCP/debug/maa.log`
+- Windows: `C:\Users\<用户名>\AppData\Local\MaaMCP\debug\maa.log`
+- macOS: `~/Library/Application Support/MaaMCP/debug/maa.log`
+- Linux: `~/.local/share/MaaMCP/debug/maa.log`
 
 ## 许可证
 

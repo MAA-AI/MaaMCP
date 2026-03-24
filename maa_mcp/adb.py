@@ -68,8 +68,16 @@ def connect_adb_device(device_name: str) -> Optional[str]:
     if not adb_controller.post_connection().wait().succeeded:
         return None
     controller_id = object_registry.register(adb_controller)
+
+    connection_params = {
+        "adb_path": device.adb_path,
+        "address": device.address,
+        "screencap_methods": device.screencap_methods,
+        "input_methods": device.input_methods,
+        "config": device.config,
+    }
+
     controller_info_registry[controller_id] = ControllerInfo(
-        controller_type=ControllerType.ADB
+        controller_type=ControllerType.ADB, connection_params=connection_params
     )
     return controller_id
-
