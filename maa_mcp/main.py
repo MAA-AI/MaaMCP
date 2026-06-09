@@ -9,3 +9,4 @@ from maa_mcp import vision  # noqa: F401
 from maa_mcp import control  # noqa: F401
 from maa_mcp import utils  # noqa: F401
 from maa_mcp import pipeline_tools  # noqa: F401
+from maa_mcp import agent_supervisor  # noqa: F401  # 触发 atexit.shutdown_all 注册
