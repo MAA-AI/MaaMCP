@@ -77,3 +77,9 @@ include = [
     "README.md",
     "LICENSE",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "unit: 纯函数单元测试，不依赖 maafw 运行时",
+    "integration: 集成测试，依赖 maafw Python 绑定",
+]
