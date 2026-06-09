@@ -6,7 +6,14 @@ from typing import Any, Dict, Optional
 
 from maa.toolkit import Toolkit
 
-from fastmcp import FastMCP
+# 兼容 fastmcp 2.x 与 3.x：
+# - 2.x：`from fastmcp import FastMCP` 可用
+# - 3.x：`FastMCP` 仅在 TYPE_CHECKING 块下从顶层暴露，运行时必须在
+#   `fastmcp.server` 中显式 import（fastmcp/server/__init__.py re-export）
+try:
+    from fastmcp import FastMCP  # fastmcp 2.x
+except ImportError:
+    from fastmcp.server import FastMCP  # fastmcp 3.x
 
 from maa_mcp import __version__
 from maa_mcp.registry import ObjectRegistry
