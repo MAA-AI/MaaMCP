@@ -18,19 +18,15 @@ from maa_mcp.pipeline_tools import (
     _normalize_paths,
     _read_and_validate_pipelines,
     _validate_entry,
-    load_pipeline as _load_pipeline_tool,
-    run_pipeline as _run_pipeline_tool,
+    load_pipeline,
+    run_pipeline,
 )
 
-# 重新绑定到底层函数（@mcp.tool 装饰后是 FunctionTool，不能直接调用）
-load_pipeline = _load_pipeline_tool.fn
-run_pipeline = _run_pipeline_tool.fn
-
-
-def _call(tool: Callable, *args: Any, **kwargs: Any) -> Any:
-    """调用 MCP 工具的底层函数（绕过 FunctionTool 包装）。"""
-    fn = getattr(tool, "fn", tool)
-    return fn(*args, **kwargs)
+# 兼容 fastmcp 2.x (FunctionTool 包装) 与 3.x (保持原函数)：
+# 2.x 下 @mcp.tool 装饰后是 FunctionTool 对象，调用需 .fn；
+# 3.x 下装饰后仍是函数，可直接调用。
+load_pipeline = getattr(load_pipeline, "fn", load_pipeline)  # type: ignore[arg-type]
+run_pipeline = getattr(run_pipeline, "fn", run_pipeline)  # type: ignore[arg-type]
 
 
 # =============================================================================
