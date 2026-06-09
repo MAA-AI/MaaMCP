@@ -12,7 +12,6 @@ from maa_mcp import __version__
 from maa_mcp.registry import ObjectRegistry
 from maa_mcp.paths import get_data_dir, ensure_dirs
 
-
 # 确保所有必要的目录存在并初始化 MaaFramework
 ensure_dirs()
 Toolkit.init_option(get_data_dir(), {"stdout_level": 0})
@@ -194,6 +193,7 @@ mcp = FastMCP(
        - ⚠️ 重要：在调用 run_pipeline 之前，必须确保当前设备/窗口处于 Pipeline 入口节点所假设的“起始界面”（与生成/录制该 Pipeline 时一致）。
          如果界面已被前序操作改变，先通过返回/导航等方式恢复到起始界面；若无法自动恢复或无法确定当前状态，请提示用户手动恢复到起始界面后再继续 run_pipeline。
        - 调用 run_pipeline(controller_id, pipeline_path) 执行 Pipeline
+         - pipeline_path 可以是单个文件路径（str），也可以是多个文件路径的列表（list[str]）
        - 检查返回的 TaskDetail：
          - status 为 succeeded 表示成功
          - status 为 failed 表示失败，需要分析 nodes 中哪个节点出错
@@ -221,8 +221,51 @@ mcp = FastMCP(
        - 反复执行"运行→分析→修复→运行"循环
        - 直到 Pipeline 稳定运行成功
        - 建议多次验证以确保鲁棒性
-    
+
     5. 通过浏览器打开最终版本的 Pipeline 可视化界面供用户查看和保存
+
+    多 Pipeline JSON 文件加载（跨文件节点引用）：
+    当业务流程被拆分为多个 pipeline JSON 文件时（如 main.json + battle.json + login.json），
+    可通过 run_pipeline(controller_id, [file1, file2, file3]) 一次性加载多个文件。
+
+    Agent 子进程生命周期（MFAAvalonia 风格 Custom Action 支持）：
+    当 `resource_path` 指向的项目在 `interface.json` 中声明了 `agent` 块时，
+    run_pipeline 会自动拉起 agent Python 子进程，把其注册的自定义 CustomAction /
+    CustomRecognition 绑定到 Resource，使 Pipeline 中 `action: Custom` 类型的节点
+    能正常执行（典型项目：MAAGC、MFAAvalonia 等）。
+
+    关键约束：
+    - **必须用 stop_pipeline 关闭**：当 Pipeline 跑完、跑飞或 AI 准备切换任务时，
+      必须调用 `stop_pipeline(controller_id)` 来原子地停掉 Tasker / Agent 子进程 /
+      OCR 循环。**严禁只调 run_pipeline 不调 stop_pipeline** —— 后台 agent 子进程
+      会脱离孤儿岛一直占着 CPU / 内存 / socket 端口。
+    - **进程死时自动兜底**：Windows 上子进程绑到 JobObject（KILL_ON_JOB_CLOSE），
+      MaaMCP 被 taskkill /F 杀掉时子进程会被 OS 连带清理；POSIX 上用 start_new_session
+      + atexit 兜底。`stop_pipeline` 是正常路径的"优雅退出"，OS 兜底是异常路径的
+      "强制清理"。
+
+    关键规则：
+    - 合并语义：所有文件的节点会被合并到 Resource 的同一全局节点表；
+      节点 `next` 引用在合并后的命名空间内解析，支持跨文件引用。
+    - 节点冲突：默认 strict 模式（节点名重复立即报错，不写入 Resource）。
+      可通过 on_conflict="overwrite" 改为"后文件覆盖前文件"。
+    - 加载是原子的：所有预校验通过后才写入 Resource，失败时不会污染现有状态。
+    - 节点驻留：已加载的节点会持续驻留到 Resource，直到调用
+      clear_pipeline_resources() 或进程结束。
+
+    典型用法：
+    - 把可复用的"通用节点"（如 OCR 文本检测、滑动操作）放到一个共享 JSON 中
+    - 业务节点（如登录、对战、菜单导航）拆分为独立 JSON
+    - 主流程文件引用其他文件的节点名即可
+
+    示例：
+    run_pipeline(
+        controller_id="ctrl_1",
+        pipeline_path=["main.json", "battle.json", "login.json"],
+        on_conflict="strict",
+    )
+
+    切换不同 pipeline 集时，调用 clear_pipeline_resources() 重置。
     """,
 )
 

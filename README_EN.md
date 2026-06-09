@@ -77,8 +77,12 @@ Talk is cheap, see: **[🎞️ Bilibili Video Demo](https://www.bilibili.com/vid
 - `get_pipeline_protocol` - Get Pipeline protocol documentation
 - `save_pipeline` - Save Pipeline JSON to file (supports creating and updating)
 - `load_pipeline` - Load an existing Pipeline file
-- `run_pipeline` - Run Pipeline and return execution results
+- `run_pipeline` - Run Pipeline and return execution results (single/multi-file, auto-start Custom action agent)
 - `open_pipeline_in_browser` - Open Pipeline visualization in browser
+
+### 🛑 Pipeline Termination
+
+- `stop_pipeline` - Atomically stop Tasker / Agent subprocess / OCR loop to prevent orphan processes
 
 ## Quick Start
 
