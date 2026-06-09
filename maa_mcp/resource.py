@@ -58,6 +58,38 @@ def clear_resource():
     object_registry.unregister(_GLOBAL_RESOURCE_KEY)
 
 
+def clear_pipelines() -> int:
+    """清空已加载的 pipeline 节点。
+
+    实现说明：maafw Resource 不提供"只清 pipeline 节点、保留 bundle 资源"的精确操作。
+    本函数走"重置整个 Resource + 重新加载所有已配置的 resource paths"路径，
+    等效于 clear_resource() 调用。
+
+    Returns:
+        成功清空时返回 0（清空后剩余 pipeline 节点数）。
+        若 Resource 尚未创建则同样返回 0（无需清空）。
+    """
+    # 若 Resource 尚未创建，无需清空
+    resource: Resource | None = object_registry.get(_GLOBAL_RESOURCE_KEY)
+    if resource is None:
+        return 0
+
+    # 重置 Resource（保留 _resource_paths，下一次 get_or_create_resource 时会重新加载）
+    clear_resource()
+    return 0
+
+
+def get_pipeline_node_count() -> int:
+    """获取当前 Resource 中已加载的 pipeline 节点数。Resource 未创建时返回 0。"""
+    resource: Resource | None = object_registry.get(_GLOBAL_RESOURCE_KEY)
+    if resource is None:
+        return 0
+    try:
+        return len(resource.node_list)
+    except Exception:
+        return 0
+
+
 def get_or_create_resource() -> Optional[Resource]:
     """
     获取或创建全局唯一的 Resource 实例。
