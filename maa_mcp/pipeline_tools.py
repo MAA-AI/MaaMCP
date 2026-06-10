@@ -28,8 +28,12 @@ from maa_mcp.resource import (
 )
 
 # Pipeline 协议文档（精简版，包含 AI 生成 Pipeline 所需的关键信息）
+# 上游同步：MaaFramework commit 6be93eed - docs/zh_cn/3.1-PipelineProtocol.md
 PIPELINE_DOCUMENTATION = """
 # MaaFramework Pipeline 协议文档
+
+> 本精简版对应上游 MaaFramework `6be93eed`（docs/zh_cn/3.1-PipelineProtocol.md）
+> 完整协议参见：https://github.com/MaaXYZ/MaaFramework/blob/main/docs/zh_cn/3.1-PipelineProtocol.md
 
 ## 概述
 
@@ -66,7 +70,13 @@ Pipeline 是 MaaFramework 的任务流水线，采用 JSON 格式描述，由若
 
 参数：
 - `expected`: string | list<string> - 期望匹配的文字，支持正则表达式
-- `roi`: [x, y, w, h] - 识别区域，可选，默认全屏 [0, 0, 0, 0]
+- `roi`: [x, y, w, h] | string - 识别区域，可选，默认全屏 [0, 0, 0, 0]；v5.6+ 支持负数（从右/下边缘计算）
+- `roi_offset`: [x, y, w, h] - 在 roi 基础上再偏移
+- `replace`: array<[from, to]> - 文字替换映射，部分识别结果不准确时可矫正
+- `order_by`: string - 结果排序方式，可选 `Horizontal`（默认）/`Vertical`/`Area`/`Length`/`Random`/`Expected`
+- `index`: int - 命中第几个结果（按 `order_by` 排序后），默认 0；负数按 Python 规则转换
+- `model`: string - 模型文件夹相对路径（需含 `rec.onnx`/`det.onnx`/`keys.txt`），多语种识别时用
+- `color_filter`: string **💡 v5.8** - 颜色过滤，填写某 `ColorMatch` 节点名，先用其颜色参数二值化再送 OCR
 
 示例：
 ```json
@@ -107,10 +117,14 @@ Pipeline 是 MaaFramework 的任务流水线，采用 JSON 格式描述，由若
 参数：
 - `target`: true | [x, y] | [x, y, w, h] | "节点名" - 点击位置
   - true: 点击当前识别到的位置（默认）
-  - [x, y]: 固定坐标点
-  - [x, y, w, h]: 在区域内随机点击
-  - "节点名": 点击之前某节点识别到的位置
+  - [x, y]: 固定坐标点，v5.6+ 支持负数（从右/下边缘计算）
+  - [x, y, w, h]: 在区域内随机点击（中心概率高），v5.6+ 支持负数
+  - "节点名": 点击之前某节点识别到的位置；v5.9+ 支持 `"[Anchor]锚点名"` 引用锚点
 - `target_offset`: [x, y, w, h] - 在 target 基础上的偏移，可选
+- `contact`: uint **💡 v5.0** - 触点编号，默认 0
+  - ADB：手指编号（0 为第一根手指，最大 10）
+  - Win32：鼠标按键（0=左键, 1=右键, 2=中键, 3=XBUTTON1, 4=XBUTTON2）
+- `pressure`: int **💡 v5.0** - 触点力度，默认 1
 
 示例：
 ```json
@@ -136,8 +150,14 @@ Pipeline 是 MaaFramework 的任务流水线，采用 JSON 格式描述，由若
 
 参数：
 - `begin`: true | [x, y] | [x, y, w, h] | "节点名" - 起始位置
-- `end`: true | [x, y] | [x, y, w, h] | "节点名" - 结束位置
-- `duration`: uint - 滑动时间（毫秒），默认 200
+- `begin_offset`: [x, y, w, h] - 在 begin 基础上的偏移
+- `end`: true | [x, y] | [x, y, w, h] | "节点名" | list<...> - 结束位置；v4.5+ 支持 list 表示折线多途径点（多 end 间不抬手）
+- `end_offset`: [x, y, w, h] | list<[x, y, w, h]> - 在 end 基础上的偏移
+- `duration`: uint | list<uint> - 滑动时间（毫秒），默认 200；list 时与 end 列表一一对应
+- `end_hold`: uint | list<uint> - 滑到终点后额外等待（毫秒），默认 0
+- `only_hover`: bool - 仅鼠标悬停移动，无按下/抬起，默认 false（仅 Windows 鼠标模式生效）
+- `contact`: uint **💡 v5.0** - 触点编号，含义同 `Click.contact`
+- `pressure`: int **💡 v5.0** - 触点力度，默认 1
 
 示例：
 ```json
@@ -190,10 +210,137 @@ Pipeline 是 MaaFramework 的任务流水线，采用 JSON 格式描述，由若
 参数：
 - `package`: string - 包名或 Activity
 
-## 通用属性
+## 节点属性
 
+所有节点共用的属性：
+
+- `recognition`: string | object - 识别算法（见"识别算法类型"小节）
+- `action`: string | object - 执行动作（见"动作类型"小节）
 - `next`: string | list<string> - 后续节点列表，按顺序尝试识别
-- `post_delay`: uint - 执行动作后、识别 next 前的延迟（毫秒），默认 200
+- `on_error`: string | list<string> - 节点执行出错时跳转的节点列表
+- `pre_delay`: uint - 识别前延迟（毫秒），默认 0
+- `post_delay`: uint - 动作执行后、识别 next 前的延迟（毫秒），默认 200
+- `timeout`: uint - 单次识别的超时时间（毫秒），默认 20000；**v5.5+ 支持 `-1` 表示无限等待**
+- `enabled`: bool - 是否启用本节点，默认 true（设为 false 可临时禁用）
+- `repeat`: uint **💡 v5.3** - 重复执行次数（用于多轮执行同一节点），默认 1
+- `rate_limit`: uint - 节点执行最小间隔（毫秒），避免过频触发，默认 1000
+
+`next` 和 `on_error` 列表中的元素支持两种节点属性写法（v5.1+ NodeAttr）：
+
+```json
+{
+    "A": {
+        "next": [
+            "B",
+            { "name": "C", "jump_back": true },
+            "[JumpBack]D"
+        ]
+    }
+}
+```
+
+对象形式与前缀形式功能等价，可混用。详见下方"进阶能力"小节。
+
+## 进阶能力（按需）
+
+以下能力 MCP 自动化中较少用到，但需要时必须知道它们的存在。
+
+### 节点属性 `jump_back` **💡 v5.1**
+
+启用跳回机制。当该节点识别命中时，系统会在其后续节点链全部执行完毕后，**重新返回该节点所在的父节点**，继续尝试父节点 `next` 列表。
+
+典型场景：处理弹窗（网络断开、权限请求等）后继续原流程。
+
+```json
+{
+    "主流程": {
+        "next": [
+            "A",
+            "B",
+            "[JumpBack]处理弹窗",
+            "C"
+        ]
+    },
+    "处理弹窗": {
+        "recognition": "OCR",
+        "expected": "网络断开",
+        "action": "Click",
+        "target": "重试"
+    }
+}
+```
+
+执行流程：主流程按 A → B → 处理弹窗 → C 顺序尝试；若命中"处理弹窗"则执行其后续链，链执行完毕后**跳回主流程**重新从 A 开始。
+
+### 节点属性 `anchor` / `[Anchor]` **💡 v5.1**
+
+锚点引用：把节点注册为"锚点"，后续节点可通过锚点名动态引用"最后设置该锚点的节点"。
+
+适用：多个节点可能处理同一类事件，需要"回到最后处理该事件的节点"继续执行。
+
+```json
+{
+    "入口A": {
+        "anchor": "上次入口",
+        "recognition": "OCR",
+        "expected": "A",
+        "next": ["统一处理"]
+    },
+    "入口B": {
+        "anchor": "上次入口",
+        "recognition": "OCR",
+        "expected": "B",
+        "next": ["统一处理"]
+    },
+    "统一处理": {
+        "recognition": "DirectHit",
+        "action": "DoNothing",
+        "next": [
+            "常规节点",
+            "[Anchor]上次入口"
+        ]
+    }
+}
+```
+
+等价的对象形式：`{ "name": "上次入口", "anchor": true }`。v5.7+ 还支持 object 形式指定目标节点或清除锚点。
+
+### `And` / `Or` 组合识别 **💡 v5.3**
+
+多个子识别需要同时命中（`And`）或任一命中（`Or`）时使用。
+
+```json
+{
+    "确认弹窗": {
+        "recognition": "And",
+        "all_of": [
+            { "sub_name": "图标", "recognition": "TemplateMatch", "template": "icon.png" },
+            { "recognition": "OCR", "roi": "图标", "expected": "确认" }
+        ],
+        "box_index": 0,
+        "action": "Click"
+    }
+}
+```
+
+v5.7+ `all_of`/`any_of` 列表元素支持字符串节点名引用，会复用该节点的识别参数。
+
+### `default_pipeline.json` **💡 v5.3**
+
+在 Bundle 根目录放 `default_pipeline.json` 可为所有节点和特定算法/动作类型设置默认参数，减少重复配置：
+
+```jsonc
+{
+    "Default": {
+        "timeout": 20000,
+        "pre_delay": 200
+    },
+    "OCR": { "threshold": 0.3 },
+    "Click": { "target": true }
+}
+```
+
+继承优先级：节点显式定义 > 对应算法/动作默认值 > `Default` > 框架内置。
 
 ## 完整示例
 
