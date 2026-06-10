@@ -307,29 +307,49 @@ class TestPipelineLoadResult:
 class TestLoadPipelineMulti:
     """`load_pipeline` 多文件集成测试（不写入 Resource）。"""
 
-    def _write(self, tmp_path: Path, name: str, data: dict[str, Any]) -> Path:
-        p = tmp_path / name
+    @pytest.fixture
+    def fake_data_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> Path:
+        """把 get_data_dir 重定向到 tmp_path，并创建 pipelines/ 子目录。
+
+        配合 issue #31 的沙箱：load_pipeline 要求路径在 pipelines/ 内。
+        """
+        fake = tmp_path / "data"
+        (fake / "pipelines").mkdir(parents=True)
+        monkeypatch.setattr("maa_mcp.paths.get_data_dir", lambda: fake)
+        return fake
+
+    def _write(self, sandbox: Path, name: str, data: dict[str, Any]) -> Path:
+        p = sandbox / name
         p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         return p
 
-    def test_single_file_returns_dict_content(self, tmp_path: Path) -> None:
+    def test_single_file_returns_dict_content(
+        self, fake_data_dir: Path, tmp_path: Path
+    ) -> None:
         """单文件：返回内容本身（向后兼容）。"""
-        f = self._write(tmp_path, "a.json", {"A": {"recognition": "DirectHit"}})
+        sandbox = fake_data_dir / "pipelines"
+        f = self._write(sandbox, "a.json", {"A": {"recognition": "DirectHit"}})
         result = load_pipeline(str(f))
         assert result == {"A": {"recognition": "DirectHit"}}
 
-    def test_single_element_list_returns_dict_content(self, tmp_path: Path) -> None:
+    def test_single_element_list_returns_dict_content(
+        self, fake_data_dir: Path, tmp_path: Path
+    ) -> None:
         """1-元素 list：与单文件行为一致。"""
-        f = self._write(tmp_path, "a.json", {"A": {"recognition": "DirectHit"}})
+        sandbox = fake_data_dir / "pipelines"
+        f = self._write(sandbox, "a.json", {"A": {"recognition": "DirectHit"}})
         result = load_pipeline([str(f)])
         assert result == {"A": {"recognition": "DirectHit"}}
 
     def test_multi_files_returns_path_to_content_mapping(
-        self, tmp_path: Path
+        self, fake_data_dir: Path, tmp_path: Path
     ) -> None:
         """多文件：返回 {abs_path: content} 映射。"""
-        f1 = self._write(tmp_path, "a.json", {"A": {"x": 1}})
-        f2 = self._write(tmp_path, "b.json", {"B": {"x": 2}})
+        sandbox = fake_data_dir / "pipelines"
+        f1 = self._write(sandbox, "a.json", {"A": {"x": 1}})
+        f2 = self._write(sandbox, "b.json", {"B": {"x": 2}})
         result = load_pipeline([str(f1), str(f2)])
         assert isinstance(result, dict)
         assert str(f1.absolute()) in result
@@ -337,15 +357,21 @@ class TestLoadPipelineMulti:
         assert result[str(f1.absolute())] == {"A": {"x": 1}}
         assert result[str(f2.absolute())] == {"B": {"x": 2}}
 
-    def test_missing_file_returns_error_string(self, tmp_path: Path) -> None:
+    def test_missing_file_returns_error_string(
+        self, fake_data_dir: Path, tmp_path: Path
+    ) -> None:
         """文件不存在：返回错误字符串。"""
-        result = load_pipeline(str(tmp_path / "nope.json"))
+        sandbox = fake_data_dir / "pipelines"
+        result = load_pipeline(str(sandbox / "nope.json"))
         assert isinstance(result, str)
         assert "不存在" in result
 
-    def test_invalid_json_returns_error_string(self, tmp_path: Path) -> None:
+    def test_invalid_json_returns_error_string(
+        self, fake_data_dir: Path, tmp_path: Path
+    ) -> None:
         """非法 JSON：返回错误字符串。"""
-        f = tmp_path / "bad.json"
+        sandbox = fake_data_dir / "pipelines"
+        f = sandbox / "bad.json"
         f.write_text("{not json", encoding="utf-8")
         result = load_pipeline(str(f))
         assert isinstance(result, str)

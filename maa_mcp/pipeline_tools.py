@@ -14,12 +14,12 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, List, Optional, Union
-from lzstring import LZString
 
 from loguru import logger
+from lzstring import LZString
 
 from maa_mcp.core import mcp, object_registry
-from maa_mcp.paths import get_data_dir
+from maa_mcp.paths import ensure_within_pipelines_dir, get_data_dir
 from maa_mcp.resource import (
     add_resource_path,
     clear_pipelines,
@@ -531,6 +531,8 @@ def _build_run_result(
     说明：
     - 用于读取已保存的 Pipeline 进行查看或修改，修改后可调用 save_pipeline() 保存。
     - 本工具只做文件 I/O，不触碰 Resource。合并/写入是 run_pipeline 的职责。
+    - 安全约束：所有路径必须位于用户数据目录下的 pipelines/ 子目录内，
+      越界路径会被拒绝。读取项目资源目录下的 pipeline 请使用 run_pipeline。
 """,
 )
 def load_pipeline(pipeline_path: Union[str, List[str]]) -> dict | str:
@@ -541,6 +543,12 @@ def load_pipeline(pipeline_path: Union[str, List[str]]) -> dict | str:
 
     if not files:
         return "pipeline_path 至少包含一个文件路径"
+
+    # 防止 path traversal (issue #31)：所有路径必须在 pipelines 目录内
+    try:
+        files = [str(ensure_within_pipelines_dir(f)) for f in files]
+    except (TypeError, ValueError) as e:
+        return f"参数错误: {e}"
 
     try:
         file_dicts = _read_and_validate_pipelines(files)
@@ -574,6 +582,8 @@ def load_pipeline(pipeline_path: Union[str, List[str]]) -> dict | str:
 
     说明：
     可用于新建 Pipeline 或更新已有 Pipeline（指定 output_path 为已有文件路径即可覆盖更新）。
+    - 安全约束：output_path 必须位于用户数据目录下的 pipelines/ 子目录内，
+      越界路径会被拒绝。
 """,
 )
 def save_pipeline(
@@ -598,7 +608,13 @@ def save_pipeline(
         return "Pipeline JSON 结构错误: 对象不能为空，至少需要包含一个节点配置"
 
     # 确定输出路径
+    # 防止 path traversal (issue #31)：output_path 必须在 pipelines 目录内
     if output_path:
+        try:
+            safe_output = ensure_within_pipelines_dir(output_path)
+        except (TypeError, ValueError) as e:
+            return f"参数错误: {e}"
+        output_path = str(safe_output)
         filepath = Path(output_path)
         # 如果指定的路径是目录，则在该目录下生成文件名
         if filepath.is_dir():
