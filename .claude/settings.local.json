@@ -2,7 +2,6 @@
   "permissions": {
     "allow": [
       "Bash(python -c \"import maa_mcp.pipeline_server\")",
-      "mcp__maa-*",
       "mcp__maa-mcp__ocr",
       "mcp__maa-mcp__click",
       "mcp__maa-mcp__wait",
@@ -13,7 +12,9 @@
       "mcp__maa-mcp__test_sweep",
       "mcp__maa-mcp__find_window_list",
       "mcp__maa-mcp__get_current_datetime",
-      "mcp__maa-mcp__run_pipeline"
+      "mcp__maa-mcp__run_pipeline",
+      "mcp__maa-mcp__connect_window",
+      "mcp__maa-mcp__input_text"
     ],
     "defaultMode": "bypassPermissions"
   },
