@@ -130,3 +130,45 @@ OCR 模型和截图存储在平台特定的目录中：
 - Windows：`C:\Users\<user>\AppData\Local\MaaMCP\`
 - macOS：`~/Library/Application Support/MaaMCP/`
 - Linux：`~/.local/share/MaaMCP/`
+
+## AI 工作笔记
+
+给在本项目工作的 AI 助手（Claude Code 等）的提醒。__工具级细节写在工具描述里__——本节只放跨工具的共性经验。
+
+### AI 调工具速度基线（单次完整循环：click→验证→input）
+
+- 最佳：5–10 s/步
+- 正常：10–20 s/步
+- 异常：>30 s/步 → 自查：是不是在啰嗦/重复验证/等错了东西
+
+提速手段（按收益排序）：
+
+1. 同轮 batch 并行发工具调用
+2. 跳过中间验证（click → input 中间不夹 screencap/ocr）
+3. 别复述显而易见的事；每个动作一句话结论
+4. 不确定__直接问用户__，别自己磨蹭 5 s
+
+### 测试方法论 checklist
+
+下任何结论前先自查：
+
+- [ ] "测什么、控什么变量"——__动手前__就明确
+- [ ] 至少 2–3 次重复，单次永远不能下结论
+- [ ] 独立信号验证（screencap + ocr 对比），不靠脑补"应该在这"
+- [ ] 每步操作后问"是不是我之前的步骤污染了"
+- [ ] 反事实思考："下拉可能不 click 也弹吗？""文本可能之前就在那吗？"
+- [ ] "API 返回 True" ≠ "动作视觉生效"——永远别只信 API
+
+### MaaMCP 工具行为注记（项目特定）
+
+- __`ocr` / `screencap` 支持 `region=(x,y,w,h)`__——小区域 OCR 提速 4–8×，坐标由 maafw `JOCR(roi=..., roi_offset=...)` 自动补偿（不用 Python 侧手写 crop+offset）。性能数据见 commit `ea4b4bd`。
+- __Win32 `click` 对 Chromium/Electron 窗口可能静默失效__——PostMessage 鼠标消息被 Chromium 丢，API 返回 True 但界面无变化。键盘消息（`post_input_text` / `post_key_*`）仍能正常投递（Chrome 内部对键盘消息更宽松）。完整说明在工具描述里。
+- __`input_text` 需要目标已聚焦__——它把字符投到当前焦点元素。`click` 失败没建立焦点的话，`input_text` 会投到错误位置。正确顺序：`click(target)` → `input_text(text)` __紧接__，中间不夹 screencap/ocr。
+- __Controller 有生命周期__——系统跨天 / Chrome 重启 / 休眠唤醒后，`controller_id` 失效。症状：所有操作静默返回 None/False。处理：重新 `find_window_list()` + `connect_window()`。
+- __别把"测试污染"误判成"工具 bug"__——工具用过一次后又失败，先检查测试状态（是否切窗、是否手动操作、controller 是否失效），再怀疑工具本身。
+
+## 本地化
+
+- [CLAUDE.md](CLAUDE.md)：本文档的英文版
+
+__规则__：更新本文件时，必须同步修改 [CLAUDE.md](CLAUDE.md)。

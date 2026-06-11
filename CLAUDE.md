@@ -132,6 +132,42 @@ OCR models and screenshots are stored in platform-specific directories:
 - macOS: `~/Library/Application Support/MaaMCP/`
 - Linux: `~/.local/share/MaaMCP/`
 
+## AI Working Notes
+
+Notes for AI agents (Claude Code, etc.) working in this project. Tool-level details live in the tool descriptions themselves; this section captures cross-cutting patterns.
+
+### Tool call pace baseline (one cycle: click → verify → input)
+
+- Best: 5–10 s/step
+- Normal: 10–20 s/step
+- Anomaly: >30 s/step → reflect: am I over-explaining, re-verifying, or waiting on the wrong thing?
+
+Speedup tactics (in order of impact):
+
+1. Batch parallel tool calls in one round
+2. Skip intermediate verification (click → input without `screencap/ocr` between)
+3. Don't re-state what's already obvious; one-line conclusion per action
+4. When uncertain, __ask the user__, don't self-argue for 5 s
+
+### Testing methodology checklist
+
+Before drawing any conclusion from a tool call, verify:
+
+- [ ] "What am I measuring + which variable am I controlling?" — defined before running
+- [ ] Repeated at least 2–3 times; single pass never concludes
+- [ ] Verified with independent signal (e.g. `screencap` + `ocr`), not by guessing "should be here"
+- [ ] Between each step, asked "did my prior step contaminate this one?"
+- [ ] Interpreted results counterfactually: "could the dropdown have appeared without my click?" / "could the text have been there from a prior test?"
+- [ ] "API returned True" ≠ "action took effect visually" — never trust API alone for visual state
+
+### MaaMCP tool behavior notes (project-specific)
+
+- __`ocr` / `screencap` accept `region=(x,y,w,h)`__ — small-region OCR is 4–8× faster, coords auto-compensated to original screen via maafw `JOCR(roi=..., roi_offset=...)` (no manual Python crop+offset needed). See commit `ea4b4bd` for the perf data.
+- __Win32 `click` on Chromium/Electron windows can silent-fail__ — PostMessage mouse events are dropped, API returns True but no visual change. Keyboard events (`post_input_text`, `post_key_*`) still work because Chrome's keyboard handler is more lenient. Tool description has the full caveat.
+- __`input_text` requires target focus__ — it sends keyboard events to the focused element. If `click` failed to focus, `input_text` lands elsewhere. Sequence: `click(target)` → `input_text(text)` in __immediate succession__, no `screencap/ocr` between.
+- __Controller has a lifecycle__ — system cross-day, Chrome restart, or sleep/wake invalidates `controller_id`. Symptom: all operations return `None`/`False` silently. Fix: re-call `find_window_list()` + `connect_window()`.
+- __Don't conflate "test contamination" with "tool bug"__ — if a tool worked once and then fails, check the test state before assuming the tool is broken. Window switching, manual user interaction between calls, and stale controllers are common contamination sources.
+
 ## Localization
 
 - [CLAUDE_CN.md](CLAUDE_CN.md): Chinese version of this document
