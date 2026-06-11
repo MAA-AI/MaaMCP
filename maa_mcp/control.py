@@ -24,6 +24,15 @@ from maa_mcp.core import mcp, object_registry, controller_info_registry, Control
 
     说明：
     坐标系统以屏幕左上角为原点 (0, 0)，X 轴向右，Y 轴向下。
+
+    重要提示：
+    - 返回 True 不代表"视觉上生效"。Win32 控制器对 Chromium/Electron
+      类窗口的鼠标 PostMessage 偶有静默失效，API 报成功但实际未点中。
+      不确定时务必用 screencap + ocr 二次确认（不要靠脑补"应该是
+      哪里"）。
+    - 如果 click 反复返回 True 但界面无任何变化，先尝试重新
+      connect_window（controller 可能已失效，常见于系统跨天/进程
+      重启后），再排查。
 """,
 )
 def click(
@@ -150,6 +159,10 @@ def swipe(
 
     说明：
     输入文本操作将模拟用户在设备屏幕上输入文本，支持中文、英文等常见字符。
+
+    重要提示：
+    - 投递字符要求目标输入框已经获得焦点。目标没聚焦就调
+      input_text，字符会投递到错误位置或被丢弃。
     """,
 )
 def input_text(controller_id: str, text: str) -> bool:

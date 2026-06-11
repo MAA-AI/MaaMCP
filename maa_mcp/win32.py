@@ -72,6 +72,15 @@ def find_window_list() -> list[str]:
     说明：
     窗口控制器 ID 将用于后续的点击、滑动、截图等操作，请妥善保存。
 
+    重要提示：
+    - 控制器**有生命周期**——系统跨天、Chrome 重启、电脑休眠唤醒
+      后，旧的 controller_id 会失效（click/ocr/screencap 等会
+      返回 None/False）。现象：所有操作静默失败。处理：重新
+      find_window_list() + connect_window()。
+    - 排查"为什么 click 没反应"时，先确认 controller 仍然有效
+      （调一次 screencap 看是否返回 None），再排查点击坐标/输入
+      方法。
+
     截图/输入方式选择（仅当默认方式不工作时尝试切换）：
 
     截图方式优先级（从高到低）：
