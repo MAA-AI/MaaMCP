@@ -46,7 +46,6 @@ dependencies = [
     "opencv-python>=4.0.0",
     "platformdirs>=4.0.0",
     "loguru>=0.7.0",
-    "lzstring>=1.0.4",
 ]
 
 [project.urls]
