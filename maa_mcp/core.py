@@ -15,6 +15,25 @@ try:
 except ImportError:
     from fastmcp.server import FastMCP  # fastmcp 3.x
 
+# 关闭 fastmcp 3.4+ 启动时自动打印的 startup banner。
+# 该 banner 含 box-drawing 字符 + Prefect 推广链接，
+# 通过 Rich Console(stderr=True) 写入 stderr，会被 MCP 客户端日志
+# 视图渲染为字面的 ▀ 乱码 + 不必要的推广信息。
+# 关联：open issue（fastmcp 3.4 banner 污染）。
+# 兼容 fastmcp 2.x：log_server_banner 在 2.x 不存在，try/except 跳过。
+#
+# 注意：fastmcp 内部 `from fastmcp.utilities.cli import log_server_banner`
+# 在 transport.py 里做了一次，import 进 transport 模块的 globals 是一份
+# 独立 binding，所以必须同时 patch 源模块和 transport 模块两个 globals。
+try:
+    import fastmcp.utilities.cli as _fmcp_cli
+    import fastmcp.server.mixins.transport as _fmcp_transport
+    _no_banner = lambda server: None
+    _fmcp_cli.log_server_banner = _no_banner
+    _fmcp_transport.log_server_banner = _no_banner
+except (ImportError, AttributeError):
+    pass
+
 from maa_mcp import __version__
 from maa_mcp.registry import ObjectRegistry
 from maa_mcp.paths import get_data_dir, ensure_dirs
