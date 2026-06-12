@@ -324,6 +324,23 @@ If the Pipeline logic itself needs adjustment, AI can re-execute automation oper
 - Minimized windows are not supported; please keep the target window in a non-minimized state
 - If the default background screenshot/input methods are unavailable (e.g., empty screenshots, unresponsive operations), the AI assistant may attempt to switch to foreground methods, which will occupy the mouse and keyboard
 
+## Platform Support
+
+| Feature | Windows | macOS | Linux |
+|---|---|---|---|
+| MCP server (`maa-mcp`) | Yes | Yes | Yes |
+| Pipeline mode (`maa-mcp-server`) | Yes | Yes | Yes |
+| `find_adb_device_list` / `connect_adb_device` | Yes | Yes | Yes |
+| `find_window_list` / `connect_window` | Yes | No | No |
+| Background screenshot / mouse / keyboard | Yes | No | No |
+
+**Linux notes**:
+- ADB-based Android control works on Linux.
+- Win32 desktop window control is **not** supported on Linux/macOS — `find_window_list()` and `connect_window()` will return `None` / raise on non-Windows platforms.
+- If you see ANSI color escape sequences (e.g. `[31m...`) leaking into MCP stdio, that is a known interaction with some MCP clients on Linux. Log files are written to `~/.local/share/MaaMCP/logs/` and are unaffected.
+
+## FAQ
+
 ## FAQ
 
 ### OCR recognition fails with "Failed to load det or rec" or prompts that resources do not exist
@@ -337,6 +354,17 @@ On first use, OCR model files will be automatically downloaded. However, downloa
 1. Check if model files exist in the above directory (`det.onnx`, `rec.onnx`, `keys.txt`)
 2. Check for resource download errors in `model/download.log`
 3. Manually run `python -c "from maa_mcp.download import download_and_extract_ocr; download_and_extract_ocr()"` to retry downloading
+
+### LM Studio says `'maa-mcp' is not recognized as an internal or external command`
+
+When you configure the MCP server in LM Studio, it needs to find the `maa-mcp` executable on `PATH`. On Windows, `pip install` puts scripts into `<Python install dir>\Scripts\` (e.g. `C:\Users\<user>\AppData\Local\Programs\Python\Python310\Scripts\`), which is often not on `PATH` by default. Fix:
+
+```powershell
+# Add Scripts dir to your user PATH (permanent)
+setx PATH "%PATH%;%LOCALAPPDATA%\Programs\Python\Python310\Scripts"
+```
+
+Then restart LM Studio. To verify: `where maa-mcp` in a new terminal should return the script path. See #6.
 
 ### About Issues
 

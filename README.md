@@ -390,6 +390,23 @@ run_pipeline(
 - 不支持对最小化的窗口进行操作，请保持目标窗口在非最小化状态
 - 若默认的后台截图/输入方式不可用（如截图为空、操作无响应），AI 助手可能会尝试切换到前台方式，届时会占用鼠标键盘
 
+## 平台支持
+
+| 功能 | Windows | macOS | Linux |
+|---|---|---|---|
+| MCP 服务器（`maa-mcp`） | 支持 | 支持 | 支持 |
+| 流水线模式（`maa-mcp-server`） | 支持 | 支持 | 支持 |
+| `find_adb_device_list` / `connect_adb_device` | 支持 | 支持 | 支持 |
+| `find_window_list` / `connect_window` | 支持 | 不支持 | 不支持 |
+| 后台截图 / 鼠标 / 键盘 | 支持 | 不支持 | 不支持 |
+
+**Linux 说明**：
+- Linux 下可正常使用 ADB 方式控制 Android 设备。
+- **不支持** Win32 桌面窗口控制 —— `find_window_list()` / `connect_window()` 在非 Windows 平台会返回 `None` 或抛错。
+- 若在 Linux 下看到 ANSI 颜色转义码（如 `[31m...`）混入 MCP stdio 流，是与部分 MCP 客户端的已知交互问题。日志仍然会写入 `~/.local/share/MaaMCP/logs/`，不受影响。
+
+## 常见问题
+
 ## 常见问题
 
 ### OCR 识别失败，报错 "Failed to load det or rec" 或提示资源不存在
@@ -403,6 +420,17 @@ run_pipeline(
 1. 检查上述目录中是否有模型文件（`det.onnx`, `rec.onnx`, `keys.txt`）
 2. 检查 `model/download.log` 中是否出现资源下载异常
 3. 手动执行 `python -c "from maa_mcp.download import download_and_extract_ocr; download_and_extract_ocr()"` 再次尝试下载
+
+### LM Studio 提示 `'maa-mcp' 不是内部或外部命令`
+
+在 LM Studio 中配置 MCP 服务器时，需要 `maa-mcp` 可执行文件在 `PATH` 上。Windows 下 `pip install` 默认把脚本装到 `<Python 安装目录>\Scripts\`（例如 `C:\Users\<用户名>\AppData\Local\Programs\Python\Python310\Scripts\`），这个目录通常不在 `PATH` 中。修复：
+
+```powershell
+# 把 Scripts 目录加到用户 PATH（永久）
+setx PATH "%PATH%;%LOCALAPPDATA%\Programs\Python\Python310\Scripts"
+```
+
+然后重启 LM Studio。验证：新开一个终端执行 `where maa-mcp` 应该返回脚本路径。详见 #6。
 
 ### 关于 ISSUE
 
