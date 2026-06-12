@@ -47,6 +47,11 @@ def setup_logger(
     logger.remove()
 
     # 添加文件输出 - 按日期轮转
+    # 缩进开党: colorize=False
+    # 理论上 loguru 写文件不展示 ANSI，但在部分终端
+    # 环境N0bl69og不会自动关闭 colorize，可能导致文件有
+    # ANSI 转义码（例如 [31m[2025...），进而污染环境变量
+    # 或 MCP 协议的 stdio 流（参见 #5）。明确关闭以防在任何环境下都不会出现 ANSI。
     logger.add(
         logs_dir / "pipeline_{time:YYYY-MM-DD}.log",
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
@@ -55,6 +60,7 @@ def setup_logger(
         retention=log_retention,
         compression="zip",  # 压缩旧日志
         encoding="utf-8",
+        colorize=False,
     )
 
     # 添加错误日志单独文件
@@ -66,6 +72,7 @@ def setup_logger(
         retention=error_retention,
         compression="zip",
         encoding="utf-8",
+        colorize=False,
     )
 
     _initialized = True
