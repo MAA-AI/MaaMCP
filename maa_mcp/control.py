@@ -301,8 +301,12 @@ def keyboard_shortcut(
     - 失败：返回 False
 
     注意：该方法仅对 Windows 窗口控制有效，无法作用于 ADB。
+    - 滚动若不生效：通常是因为目标窗口未获得键盘/鼠标焦点。PostMessage
+      输入模式下尤其常见（见 #18）。可先 click 窗口空白处确保焦点后
+      再 scroll；若仍失败，考虑改用 swipe()。
     """,
 )
+
 def scroll(controller_id: str, x: int, y: int) -> Union[bool, str]:
     controller = object_registry.get(controller_id)
     if not controller:
