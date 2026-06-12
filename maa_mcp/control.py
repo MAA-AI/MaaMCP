@@ -163,6 +163,10 @@ def swipe(
     重要提示：
     - 投递字符要求目标输入框已经获得焦点。目标没聚焦就调
       input_text，字符会投递到错误位置或被丢弃。
+    - 浏览器地址栏/搜索框等带自动补全的输入框：input_text 后立即
+      按 Enter 可能会跳到补全后的地址，而不是回车提交当前输入。
+      建议序列：input_text → 短暂等待 → 若需要再 Backspace 删除补全
+      → Enter；或者 input_text → 等待补全出现 → 点击目标条目。
     """,
 )
 def input_text(controller_id: str, text: str) -> bool:
