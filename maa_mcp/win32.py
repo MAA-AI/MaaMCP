@@ -94,6 +94,7 @@ def find_window_list() -> list[str]:
     鼠标方式优先级（从高到低）：
       - "PostMessage"（默认，可后台）
       - "PostMessageWithCursorPos"（可后台，但偶尔会抢鼠标）
+        注：PostMessage 模式下有时会将窗口放到顶层并抢窗口，远程或实验室环境可能更明显（参见 #18）
       - "Seize"（只能前台，会抢占鼠标键盘）
 
     键盘方式优先级（从高到低）：
