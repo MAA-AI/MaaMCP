@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/maa-ai-maamcp-badge.png)](https://mseep.ai/app/maa-ai-maamcp)
+
 <!-- markdownlint-disable MD033 MD041 MD024 -->
 <p align="center">
   <img alt="LOGO" src="https://cdn.jsdelivr.net/gh/MaaAssistantArknights/design@main/logo/maa-logo_512x512.png" width="256" height="256" />
