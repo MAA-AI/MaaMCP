@@ -1,5 +1,4 @@
 from datetime import datetime
-from pathlib import Path
 from typing import Optional, Tuple, Union
 
 import cv2
@@ -27,19 +26,123 @@ def _crop_region(image, region: Optional[Tuple[int, int, int, int]]):
     return image[y : y + h, x : x + w]
 
 
+def _resize_short_edge(image, target_short_edge: int):
+    """按短边归一化到 target_short_edge 像素，保留原图长宽比。
+
+    设计：720p 不锁死 16:9。720p = 短边 720 像素。原始设备是 1080p / 1440p /
+    非 16:9（如 16:10、5:4）等任意比例，都按短边等比缩放。
+
+    示例（target=720）：
+    - 1920×1080 (横屏 1080p) → 1280×720
+    - 1080×1920 (竖屏 1080p) → 720×1280
+    - 1280×800 (16:10 平板)   → 1152×720
+    - 1280×1024 (5:4 显示器)  →  900×720
+    - 1280×720 (已归一化)     → no-op
+
+    Args:
+        image: cv2 图像 (numpy.ndarray)。
+        target_short_edge: 目标短边像素数，必须 > 0。
+
+    Returns:
+        缩放后的图像；若短边已等于 target，则原图返回（no-op）。
+    """
+    if target_short_edge <= 0:
+        raise ValueError(
+            f"target_short_edge 必须 > 0，实际: {target_short_edge}"
+        )
+    h, w = image.shape[:2]
+    short = min(h, w)
+    if short == target_short_edge:
+        return image
+    scale = target_short_edge / short
+    if h <= w:
+        new_h = target_short_edge
+        new_w = int(round(w * scale))
+    else:
+        new_w = target_short_edge
+        new_h = int(round(h * scale))
+    return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+
+def _scale_region_to_image(
+    region: Tuple[float, float, float, float],
+    raw_shape: Tuple[int, int],
+    new_shape: Tuple[int, int],
+) -> Tuple[float, float, float, float]:
+    """按比例把 region 从 raw 坐标空间缩放到 new 坐标空间。
+
+    当 raw_shape == new_shape 时直接返回原 region（no-op）。
+
+    Args:
+        region: (x, y, w, h) 在 raw 坐标空间的区域。
+        raw_shape: 原始图像 (H, W)。
+        new_shape: 目标图像 (H, W)。
+
+    Returns:
+        缩放后的 (x, y, w, h)。
+    """
+    raw_h, raw_w = raw_shape
+    new_h, new_w = new_shape
+    if (raw_w, raw_h) == (new_w, new_h):
+        return region
+    sx = new_w / raw_w
+    sy = new_h / raw_h
+    x, y, w, h = region
+    return (x * sx, y * sy, w * sx, h * sy)
+
+
+def _apply_screencap_pipeline(
+    raw,
+    region: Optional[Tuple[int, int, int, int]],
+    resolution: Optional[int],
+):
+    """screencap 图像处理流水线（纯函数，可独立单测）。
+
+    流程：
+    1. 若 resolution 非 None：按短边归一化
+    2. 若 region 非 None 且做了归一化：按比例缩放 region（从 raw 坐标系 → new 坐标系）
+    3. 按 region 裁剪（无 region 则返回全图）
+
+    region 语义：坐标空间永远是 raw 设备原始分辨率。函数负责缩放。
+    """
+    raw_h, raw_w = raw.shape[:2]
+
+    if resolution is not None:
+        image = _resize_short_edge(raw, resolution)
+    else:
+        image = raw
+
+    if region is not None and resolution is not None:
+        new_h, new_w = image.shape[:2]
+        region = _scale_region_to_image(
+            region, raw_shape=(raw_h, raw_w), new_shape=(new_h, new_w)
+        )
+
+    return _crop_region(image, region)
+
+
 def _screencap(
-    controller_id: str, region: Optional[Tuple[int, int, int, int]] = None
+    controller_id: str,
+    region: Optional[Tuple[int, int, int, int]] = None,
+    resolution: Optional[int] = 720,
 ) -> Optional[str]:
+    """截图核心实现：拉 controller 截图 + 应用图像处理流水线 + 落盘。
+
+    region 语义（重要）：
+        region 的 (x, y, w, h) **永远在设备原始分辨率坐标系**下，不在落盘图
+        坐标系下。函数会按归一化比例自动缩放。AI 无需关心输出图实际是
+        720p 还是其他尺寸。
+    """
     controller: Controller | None = object_registry.get(controller_id)
     if not controller:
         return None
-    image = controller.post_screencap().wait().get()
-    if image is None:
+    raw = controller.post_screencap().wait().get()
+    if raw is None:
         return None
 
-    image = _crop_region(image, region)
+    image = _apply_screencap_pipeline(raw, region, resolution)
 
-    # 保存截图到跨平台用户数据目录，返回路径供大模型按需读取
+    # 落盘
     screenshots_dir = get_screenshots_dir()
     screenshots_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -142,8 +245,16 @@ def ocr(
     参数：
     - controller_id: 控制器 ID，由 connect_adb_device() 或 connect_window() 返回
     - region: 可选 (x, y, w, h) 整型元组，指定屏幕上的一个矩形区域，只截并保存该区域。
+              ⚠️ region 坐标空间 = **设备原始分辨率**（不是落盘图分辨率）。
+              若设备是 1080p (1920×1080)，region 的 x/y/w/h 都按 1080p 坐标想。
+              函数会按归一化比例自动缩放 region，无需 AI 关心输出图实际尺寸。
               适用于"我只想看搜框附近 / 某个按钮周围"的场景，省传输与读图时间。
               不传则截全屏（默认行为）。
+    - resolution: 可选整数，短边归一化目标（像素），默认 720。
+              720p 不锁死 16:9：按短边等比缩放，原图长宽比保留。
+              例如：1920×1080 → 1280×720；1080×1920 → 720×1280；
+                    1280×800 (16:10) → 1152×720。
+              传 None 跳过归一化，落盘图为原始设备分辨率（region 也在原始空间）。
 
     返回值：
     - 成功：返回截图文件的绝对路径，可通过 read_file 工具读取图片内容
@@ -151,6 +262,8 @@ def ocr(
 """,
 )
 def screencap(
-    controller_id: str, region: Optional[Tuple[int, int, int, int]] = None
+    controller_id: str,
+    region: Optional[Tuple[int, int, int, int]] = None,
+    resolution: Optional[int] = 720,
 ) -> Optional[str]:
-    return _screencap(controller_id, region)
+    return _screencap(controller_id, region, resolution)
