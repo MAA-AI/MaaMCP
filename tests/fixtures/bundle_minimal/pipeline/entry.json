@@ -1,0 +1,11 @@
+{
+  "MyEntry": {
+    "recognition": "DirectHit",
+    "action": "DoNothing",
+    "next": ["MyExit"]
+  },
+  "MyExit": {
+    "recognition": "DirectHit",
+    "action": "DoNothing"
+  }
+}

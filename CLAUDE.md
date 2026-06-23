@@ -167,6 +167,23 @@ Before drawing any conclusion from a tool call, verify:
 - __`input_text` requires target focus__ — it sends keyboard events to the focused element. If `click` failed to focus, `input_text` lands elsewhere. Sequence: `click(target)` → `input_text(text)` in __immediate succession__, no `screencap/ocr` between.
 - __Controller has a lifecycle__ — system cross-day, Chrome restart, or sleep/wake invalidates `controller_id`. Symptom: all operations return `None`/`False` silently. Fix: re-call `find_window_list()` + `connect_window()`.
 - __Don't conflate "test contamination" with "tool bug"__ — if a tool worked once and then fails, check the test state before assuming the tool is broken. Window switching, manual user interaction between calls, and stale controllers are common contamination sources.
+- __`save_captured_image` writes into project bundle, not MaaMCP data dir__ — destination is `<bundle_root>/image/<subcategory>/<name>.png` (the path TemplateMatch's `template` field reads from). `bundle_root` is the directory passed to `Resource.post_bundle()`. For MAAGC it's `assets/resource/base/`; for MaaFramework sample it's `<repo>/sample/resource`. Default `overwrite=False` protects existing templates — pass `True` explicitly when updating.
+- __`benchmark_node` measures wall-clock, not per-node timing__ — returned `latency_ms` is full `post_task → TaskDetail` time, including entry recognition overhead (~50-200ms). For per-node estimate subtract that baseline. `mean_score=None` with `successes=0` means the node never hit — threshold/ROI/template mismatch.
+
+### Pipeline node tuning loop
+
+When a TemplateMatch / OCR / ColorMatch node isn't reliable, iterate this loop (issue #36 item #4):
+
+1. `screencap(cid)` → Read source frame, visually locate target region
+2. `screencap(cid, region=(x, y, w, h))` → crop just that region
+3. Read cropped image → confirm it's the intended element
+4. `save_captured_image(cropped_path, bundle_root, subcategory, name)` → promote it to a TemplateMatch template
+5. In pipeline JSON: `"recognition": "TemplateMatch", "template": "<subcategory>/<name>.png"`
+6. `benchmark_node(cid, pipeline_path, node=<name>, iterations=10..50)` → inspect `mean_score`, `latency_ms`, `all_results_samples`
+7. If `mean_score` < 0.85 or `successes < iterations`: tighten ROI (smaller `region`), raise `threshold`, or refresh the template with a fresh capture
+8. Repeat 2-7 until stable
+
+For MaaMCP-side pipeline infra testing, see `tests/test_dbg_pipeline.py` (gated by `@pytest.mark.integration`; skips if `MaaDbgControlUnit` DLL isn't shipped).
 
 ## Localization
 

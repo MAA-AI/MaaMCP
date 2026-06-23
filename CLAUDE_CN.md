@@ -166,6 +166,23 @@ OCR 模型和截图存储在平台特定的目录中：
 - __`input_text` 需要目标已聚焦__——它把字符投到当前焦点元素。`click` 失败没建立焦点的话，`input_text` 会投到错误位置。正确顺序：`click(target)` → `input_text(text)` __紧接__，中间不夹 screencap/ocr。
 - __Controller 有生命周期__——系统跨天 / Chrome 重启 / 休眠唤醒后，`controller_id` 失效。症状：所有操作静默返回 None/False。处理：重新 `find_window_list()` + `connect_window()`。
 - __别把"测试污染"误判成"工具 bug"__——工具用过一次后又失败，先检查测试状态（是否切窗、是否手动操作、controller 是否失效），再怀疑工具本身。
+- __`save_captured_image` 写入项目 bundle，不是 MaaMCP 数据目录__——目标是 `<bundle_root>/image/<子分类>/<元素名>.png`（TemplateMatch 的 `template` 字段读取路径）。`bundle_root` 是传给 `Resource.post_bundle()` 的目录：MAAGC 是 `assets/resource/base/`；MaaFramework sample 是 `<repo>/sample/resource`。默认 `overwrite=False` 保护已有模板，更新时显式传 `True`。
+- __`benchmark_node` 测的是 wall-clock，不是单节点耗时__——返回的 `latency_ms` 是 `post_task → TaskDetail` 总耗时，含 entry 识别开销（~50-200ms）。想估节点本身耗时减掉这段基线。`mean_score=None` 且 `successes=0` 表示一次都没命中——通常是阈值/ROI/模板漂移的信号。
+
+### Pipeline 节点调参循环
+
+TemplateMatch / OCR / ColorMatch 节点不稳定时，按这个循环迭代（issue #36 item #4）：
+
+1. `screencap(cid)` → Read 源帧，目视定位目标 region
+2. `screencap(cid, region=(x, y, w, h))` → 只裁那块
+3. Read 裁图 → 视觉确认是不是预期元素
+4. `save_captured_image(cropped_path, bundle_root, subcategory, name)` → 提到 TemplateMatch 模板
+5. pipeline JSON 里写：`"recognition": "TemplateMatch", "template": "<subcategory>/<name>.png"`
+6. `benchmark_node(cid, pipeline_path, node=<name>, iterations=10..50)` → 看 `mean_score`、`latency_ms`、`all_results_samples`
+7. `mean_score < 0.85` 或 `successes < iterations`：收紧 ROI（缩 `region`）、抬高 `threshold`、或重新截一张更准的模板
+8. 重复 2-7 直到稳定
+
+MaaMCP 侧 pipeline infra 集成测试见 `tests/test_dbg_pipeline.py`（标 `@pytest.mark.integration`；缺 `MaaDbgControlUnit` DLL 时自动 skip）。
 
 ## 本地化
 

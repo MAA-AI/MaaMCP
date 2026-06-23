@@ -5,17 +5,21 @@
 - _scale_region_to_image: region 在 raw → new 坐标系下的缩放
 - _crop_region: 边界 clamp
 - _apply_screencap_pipeline: 完整流水线（resize + region 缩放 + 裁剪）端到端
+- _save_captured_image / _validate_path_segment: 把裁图存到 MaaFramework bundle image 目录
 """
 
 import cv2
 import numpy as np
 import pytest
+from pathlib import Path
 
 from maa_mcp.vision import (
     _apply_screencap_pipeline,
     _crop_region,
     _resize_short_edge,
+    _save_captured_image,
     _scale_region_to_image,
+    _validate_path_segment,
 )
 
 
@@ -288,3 +292,166 @@ class TestScreencapSaveRoundtrip:
         # 读回验证 shape
         loaded = cv2.imread(str(filepath))
         assert loaded.shape == expected_shape
+
+
+# ---------------------------------------------------------------------------
+# _validate_path_segment
+# ---------------------------------------------------------------------------
+
+
+class TestValidatePathSegment:
+    """校验 subcategory / name 等路径段：非空、不含 ..、不是绝对路径。"""
+
+    def test_normal_string_returned_stripped(self):
+        assert _validate_path_segment("UI", "subcategory") == "UI"
+        assert _validate_path_segment("  UI  ", "subcategory") == "UI"
+
+    def test_empty_string_rejected(self):
+        with pytest.raises(ValueError, match="不能为空"):
+            _validate_path_segment("", "name")
+        with pytest.raises(ValueError, match="不能为空"):
+            _validate_path_segment("   ", "name")
+
+    def test_non_string_rejected(self):
+        with pytest.raises(ValueError, match="必须是 str"):
+            _validate_path_segment(None, "name")  # type: ignore[arg-type]
+
+    def test_traversal_rejected(self):
+        with pytest.raises(ValueError, match=r"不能包含 '\.\.' 段"):
+            _validate_path_segment("../foo", "subcategory")
+        with pytest.raises(ValueError, match=r"不能包含 '\.\.' 段"):
+            _validate_path_segment("../../etc/passwd", "name")
+        with pytest.raises(ValueError, match=r"不能包含 '\.\.' 段"):
+            _validate_path_segment("foo/../bar", "name")
+
+    def test_absolute_path_rejected(self):
+        # "/abs/path" 先被前导分隔符检查拦截（更具体的错误）
+        with pytest.raises(ValueError, match="不能以路径分隔符开头"):
+            _validate_path_segment("/abs/path", "name")
+
+    def test_windows_drive_letter_rejected(self):
+        # 在 Windows 上 Path("C:\\foo").is_absolute() == True，已被绝对路径分支兜住
+        # 这里只保证它抛 ValueError（不被当作合法相对路径接受）
+        with pytest.raises(ValueError):
+            _validate_path_segment("C:\\foo", "name")
+
+    def test_leading_separator_rejected(self):
+        """以 / 或 \\ 开头的串视为可疑（Windows 上 /abs 是相对路径但意图是绝对）。"""
+        with pytest.raises(ValueError, match="不能以路径分隔符开头"):
+            _validate_path_segment("/leading", "name")
+        with pytest.raises(ValueError, match="不能以路径分隔符开头"):
+            _validate_path_segment("\\leading", "name")
+
+
+# ---------------------------------------------------------------------------
+# _save_captured_image
+# ---------------------------------------------------------------------------
+
+
+def _write_test_png(path, shape=(32, 64, 3)):
+    """写一张全黑 PNG 到 path，返回 path。"""
+    img = np.zeros(shape, dtype=np.uint8)
+    assert cv2.imwrite(str(path), img)
+    return path
+
+
+class TestSaveCapturedImage:
+    """_save_captured_image 把截图存到 <bundle_root>/image/<sub>/<name>.png。"""
+
+    def test_happy_path(self, tmp_path):
+        # Arrange：tmp bundle_root + 一张输入 PNG
+        bundle_root = tmp_path / "bundle"
+        src = _write_test_png(tmp_path / "source.png", shape=(40, 80, 3))
+
+        # Act
+        result = _save_captured_image(
+            captured_path=str(src),
+            bundle_root=bundle_root,
+            subcategory="UI",
+            name="MyButton",
+        )
+
+        # Assert：返回路径正确 + 文件存在 + shape 还原
+        expected = (bundle_root / "image" / "UI" / "MyButton.png").absolute()
+        assert result == str(expected)
+        assert expected.is_file()
+        loaded = cv2.imread(str(expected))
+        assert loaded.shape == (40, 80, 3)
+
+    def test_creates_parent_dirs(self, tmp_path):
+        bundle_root = tmp_path / "bundle"
+        src = _write_test_png(tmp_path / "source.png")
+        result = _save_captured_image(
+            str(src), bundle_root, "Deep/Nested/Cat", "X"
+        )
+        target = Path(result)
+        assert target.is_file()
+        assert target.parent == (bundle_root / "image" / "Deep" / "Nested" / "Cat").absolute()
+
+    def test_existing_file_no_overwrite_rejected(self, tmp_path):
+        bundle_root = tmp_path / "bundle"
+        src = _write_test_png(tmp_path / "source.png")
+        # 先写一次
+        _save_captured_image(str(src), bundle_root, "UI", "Dup")
+        # 再写一次（默认 overwrite=False）→ 抛 ValueError
+        with pytest.raises(ValueError, match="目标已存在"):
+            _save_captured_image(str(src), bundle_root, "UI", "Dup")
+
+    def test_existing_file_overwrite_succeeds(self, tmp_path):
+        bundle_root = tmp_path / "bundle"
+        src = _write_test_png(tmp_path / "source.png", shape=(10, 10, 3))
+        first_path = _save_captured_image(str(src), bundle_root, "UI", "Dup")
+        # 写一张不同的图
+        src2 = _write_test_png(tmp_path / "source2.png", shape=(20, 30, 3))
+        result = _save_captured_image(
+            str(src2), bundle_root, "UI", "Dup", overwrite=True
+        )
+        assert result == first_path
+        loaded = cv2.imread(result)
+        assert loaded.shape == (20, 30, 3)
+
+    def test_traversal_in_name_rejected(self, tmp_path):
+        bundle_root = tmp_path / "bundle"
+        src = _write_test_png(tmp_path / "source.png")
+        with pytest.raises(ValueError, match=r"'\.\.' 段"):
+            _save_captured_image(str(src), bundle_root, "UI", "../../etc/passwd")
+
+    def test_traversal_in_subcategory_rejected(self, tmp_path):
+        bundle_root = tmp_path / "bundle"
+        src = _write_test_png(tmp_path / "source.png")
+        with pytest.raises(ValueError, match=r"'\.\.' 段"):
+            _save_captured_image(str(src), bundle_root, "../foo", "X")
+
+    def test_absolute_name_rejected(self, tmp_path):
+        bundle_root = tmp_path / "bundle"
+        src = _write_test_png(tmp_path / "source.png")
+        # "/abs" 以分隔符开头，先被前导分隔符检查拦截
+        with pytest.raises(ValueError, match="不能以路径分隔符开头"):
+            _save_captured_image(str(src), bundle_root, "UI", "/abs")
+
+    def test_empty_subcategory_rejected(self, tmp_path):
+        bundle_root = tmp_path / "bundle"
+        src = _write_test_png(tmp_path / "source.png")
+        with pytest.raises(ValueError, match="不能为空"):
+            _save_captured_image(str(src), bundle_root, "", "X")
+
+    def test_empty_name_rejected(self, tmp_path):
+        bundle_root = tmp_path / "bundle"
+        src = _write_test_png(tmp_path / "source.png")
+        with pytest.raises(ValueError, match="不能为空"):
+            _save_captured_image(str(src), bundle_root, "UI", "")
+
+    def test_missing_captured_path_rejected(self, tmp_path):
+        bundle_root = tmp_path / "bundle"
+        nonexistent = tmp_path / "does_not_exist.png"
+        with pytest.raises(ValueError, match="不是有效文件"):
+            _save_captured_image(str(nonexistent), bundle_root, "UI", "X")
+
+    def test_bundle_root_does_not_exist_creates(self, tmp_path):
+        """bundle_root 路径不存在时自动创建（user-friendly）。"""
+        bundle_root = tmp_path / "newly_created_bundle"
+        assert not bundle_root.exists()
+        src = _write_test_png(tmp_path / "source.png")
+        result = _save_captured_image(str(src), bundle_root, "UI", "X")
+        assert bundle_root.is_dir()
+        assert Path(result).is_file()

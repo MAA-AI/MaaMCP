@@ -8,6 +8,7 @@ Pipeline 生成支持模块
 """
 
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -1058,3 +1059,306 @@ def stop_pipeline(controller_id: str) -> dict | str:
     result = stop_agent_supervised(controller_id, grace_seconds=3.0)
     result["ocr_loop_stopped"] = ocr_running
     return result
+
+
+# =============================================================================
+# benchmark_node：对单个 pipeline node 跑 N 次采集识别延迟 / score 统计
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class BenchmarkRunResult:
+    """benchmark_node 的统一返回结构。
+
+    字段说明：
+    - node: 被测节点名
+    - iterations: 请求跑的总次数
+    - successes: 识别命中（all_results 非空）的次数
+    - min_score / max_score / mean_score: 命中时的 score 统计；全未命中则为 None
+    - latency_ms: 每次 post_task 到拿到 TaskDetail 的总耗时（毫秒，整数）
+    - all_results_samples: 前 3 次的 all_results 采样（每项 box + score），
+      方便快速排查识别漂移
+    """
+
+    node: str
+    iterations: int
+    successes: int
+    min_score: Optional[float]
+    max_score: Optional[float]
+    mean_score: Optional[float]
+    latency_ms: List[int]
+    all_results_samples: List[List[dict]]
+
+    def to_dict(self) -> dict:
+        return {
+            "node": self.node,
+            "iterations": self.iterations,
+            "successes": self.successes,
+            "min_score": self.min_score,
+            "max_score": self.max_score,
+            "mean_score": self.mean_score,
+            "latency_ms": list(self.latency_ms),
+            "all_results_samples": [list(s) for s in self.all_results_samples],
+        }
+
+
+_BENCHMARK_DONE_NODE = "_BenchmarkDone"
+
+
+def _build_benchmark_override(
+    entry: str,
+    target_node: str,
+    base: dict,
+    done_node: str = _BENCHMARK_DONE_NODE,
+) -> dict:
+    """构造 benchmark 用的 override pipeline。
+
+    结构：
+    - entry：复用 base 的 entry 配置，但 next 强制指向 target_node
+    - target_node：复用 base 的 target_node 配置，但 next 强制指向 done_node
+      （剥离掉原始 next，避免触发下游副作用）
+    - done_node：DirectHit 占位，让 tasker 跑完一轮正常结束
+
+    Args:
+        entry: 入口节点名（必须在 base 中）
+        target_node: 被测节点名（必须在 base 中）
+        base: 合并后的完整 pipeline dict
+        done_node: 占位节点名；可选改写以避免与已有节点冲突
+
+    Returns:
+        新 dict（不修改 base），含 entry / target_node / done_node 三键。
+
+    Raises:
+        ValueError: entry / target_node 缺失或相等。
+    """
+    if entry not in base:
+        raise ValueError(f"entry 不在 base 中: {entry!r}")
+    if target_node not in base:
+        raise ValueError(f"target_node 不在 base 中: {target_node!r}")
+    if entry == target_node:
+        raise ValueError(f"entry 与 target_node 必须不同: {entry!r}")
+    if done_node in base:
+        raise ValueError(
+            f"done_node 名 {done_node!r} 与 base 中现有节点冲突，请传 done_node 重命名"
+        )
+
+    entry_clean = {**base[entry], "next": [target_node]}
+    target_clean = {**base[target_node], "next": [done_node]}
+    done = {"recognition": "DirectHit", "action": "DoNothing"}
+    return {
+        entry: entry_clean,
+        target_node: target_clean,
+        done_node: done,
+    }
+
+
+def _extract_score_from_node_detail(node_detail: Any, target_name: str) -> Optional[float]:
+    """从 NodeDetail 抽出 target_name 节点的命中 score；未命中返回 None。"""
+    if node_detail is None or node_detail.name != target_name:
+        return None
+    recognition = getattr(node_detail, "recognition", None)
+    if recognition is None:
+        return None
+    all_results = getattr(recognition, "all_results", None) or []
+    if not all_results:
+        return None
+    score = getattr(all_results[0], "score", None)
+    if isinstance(score, (int, float)):
+        return float(score)
+    return None
+
+
+def _summarize_iteration(node_detail: Any, target_name: str) -> tuple[Optional[float], List[dict]]:
+    """单次迭代汇总：返回 (score 或 None, all_results 样本)。"""
+    if node_detail is None or node_detail.name != target_name:
+        return None, []
+    recognition = getattr(node_detail, "recognition", None)
+    if recognition is None:
+        return None, []
+    all_results = getattr(recognition, "all_results", None) or []
+    sample: List[dict] = []
+    for r in all_results:
+        box = getattr(r, "box", None)
+        score = getattr(r, "score", None)
+        sample.append(
+            {
+                "box": list(box) if box is not None else None,
+                "score": float(score) if isinstance(score, (int, float)) else None,
+            }
+        )
+    score = _extract_score_from_node_detail(node_detail, target_name)
+    return score, sample
+
+
+def _aggregate_benchmark(
+    target_name: str,
+    per_iter: List[tuple[Optional[float], List[dict], int]],
+) -> BenchmarkRunResult:
+    """聚合多次迭代结果。
+
+    Args:
+        target_name: 被测节点名
+        per_iter: [(score, sample, latency_ms), ...]
+
+    Returns:
+        BenchmarkRunResult 实例。
+    """
+    scores: List[float] = [s for s, _, _ in per_iter if s is not None]
+    latencies = [lat for _, _, lat in per_iter]
+    samples = [sample for _, sample, _ in per_iter[:3]]  # 只保留前 3 次
+    return BenchmarkRunResult(
+        node=target_name,
+        iterations=len(per_iter),
+        successes=len(scores),
+        min_score=min(scores) if scores else None,
+        max_score=max(scores) if scores else None,
+        mean_score=(sum(scores) / len(scores)) if scores else None,
+        latency_ms=latencies,
+        all_results_samples=samples,
+    )
+
+
+def _benchmark_node_impl(
+    controller_id: str,
+    pipeline_path: Union[str, List[str]],
+    node: str,
+    entry: Optional[str] = None,
+    iterations: int = 10,
+    resource_path: Optional[str] = None,
+) -> dict | str:
+    """benchmark_node 的核心实现（不含 @mcp.tool 装饰，便于单测 + 复用）。
+
+    行为：
+    1. 校验 iterations ∈ [1, 1000]
+    2. 加载 + 合并 pipeline（用 OVERWRITE 策略，benchmark_node 视角下冲突无所谓）
+    3. 解析 entry（默认用首个文件的第一个 key）
+    4. 校验 node / entry 都在 merged 中
+    5. 加载 Resource（若有 resource_path）+ Tasker
+    6. 构造 override pipeline（强制 entry → target → done）
+    7. 跑 iterations 次，每次记录 wall-clock latency + target.score + 采样
+    8. 聚合返回 BenchmarkRunResult
+    """
+    if not isinstance(iterations, int) or iterations < 1 or iterations > 1000:
+        return (
+            f"参数错误: iterations 必须是 1..1000 的整数，实际: {iterations!r}"
+        )
+
+    # 1) 规范化 + 预校验 + 合并
+    try:
+        files = _normalize_paths(pipeline_path)
+    except TypeError as e:
+        return f"参数错误: {e}"
+    if not files:
+        return "pipeline_path 至少包含一个文件路径"
+    try:
+        file_dicts = _read_and_validate_pipelines(files)
+    except ValueError as e:
+        return f"Pipeline 校验失败: {e}"
+    try:
+        merged, _conflicts = _merge_pipelines(file_dicts, ConflictStrategy.OVERWRITE)
+    except ValueError as e:
+        return f"Pipeline 校验失败: {e}"
+
+    if node not in merged:
+        return f"node {node!r} 不存在（可用节点: {sorted(merged.keys())}）"
+    entry_node = entry or next(iter(file_dicts[0][1].keys()))
+    if entry_node not in merged:
+        return f"入口节点 {entry_node!r} 不存在（可用节点: {sorted(merged.keys())}）"
+
+    # 2) Resource + Tasker
+    if resource_path:
+        add_resource_path(resource_path)
+    resource = get_or_create_resource()
+    if not resource:
+        return "获取 Resource 失败"
+    tasker = get_or_create_tasker(controller_id)
+    if not tasker:
+        return "获取 Tasker 失败，请确保 controller_id 有效"
+
+    # 3) Override pipeline
+    try:
+        override = _build_benchmark_override(entry_node, node, merged)
+    except ValueError as e:
+        return f"override pipeline 构造失败: {e}"
+    if not resource.override_pipeline(override):
+        return "override_pipeline 写入失败"
+
+    # 4) 跑 iterations
+    per_iter: List[tuple[Optional[float], List[dict], int]] = []
+    for _ in range(iterations):
+        start = time.perf_counter()
+        detail = tasker.post_task(entry_node).wait().get()
+        elapsed_ms = int(round((time.perf_counter() - start) * 1000))
+        target_detail = None
+        if detail and getattr(detail, "nodes", None):
+            target_detail = next(
+                (n for n in detail.nodes if getattr(n, "name", None) == node),
+                None,
+            )
+        score, sample = _summarize_iteration(target_detail, node)
+        per_iter.append((score, sample, elapsed_ms))
+
+    return _aggregate_benchmark(node, per_iter).to_dict()
+
+
+@mcp.tool(
+    name="benchmark_node",
+    description="""
+    对单个 pipeline node 跑 N 次，采集识别延迟 / score 统计，用于调阈值 / ROI。
+
+    适用场景（issue #36 item #4）：
+    - 调 TemplateMatch 节点：threshold 是否合理？是否需要更紧的 ROI？
+    - 调 OCR 节点：expected 是否覆盖所有变体？`replace` 是否还有遗漏？
+    - 调 ColorMatch：lower/upper 区间是否稳定？
+    - 验收节点：上线前跑 50/100 次确认识别稳定
+
+    参数：
+    - controller_id: 控制器 ID，由 connect_adb_device() / connect_window() 返回
+    - pipeline_path: Pipeline JSON 路径（str 或 list[str]）
+    - node: 被测节点名（必须在 pipeline 中）
+    - entry: 入口节点名（可选；默认用首个文件第一个 key）
+    - iterations: 跑几次（1..1000，默认 10）
+    - resource_path: 资源目录路径（可选，同 run_pipeline）
+
+    实现机制：
+    1. 加载完整 pipeline（用 OVERWRITE 策略，benchmark 视角下冲突无所谓）
+    2. 构造 override pipeline：entry → node（强制）→ done（剥离原 next）
+       避免 node 原 next 触发下游副作用
+    3. 跑 iterations 次，每次记录 wall-clock latency + node.recognition.all_results[0].score
+    4. 聚合返回 BenchmarkRunResult
+
+    返回值 BenchmarkRunResult.to_dict()：
+    {
+      "node": "MyButton",
+      "iterations": 10,
+      "successes": 10,
+      "min_score": 0.91,
+      "max_score": 0.98,
+      "mean_score": 0.95,
+      "latency_ms": [320, 305, 311, ...],
+      "all_results_samples": [
+        [{"box": [...], "score": 0.96}, ...],
+        ...
+      ]
+    }
+
+    说明：
+    - latency_ms 是 post_task → TaskDetail 拿到的总耗时，包含 entry 的识别开销。
+      若只想看 node 本身的识别耗时，减去 entry 识别开销（约 50-200ms）即可。
+    - score 全 None 时（successes=0）说明 node 一次都没命中；
+      这通常是阈值过高 / ROI 错位 / 模板漂移的信号。
+    - 不会动 Resource 中已有的 pipeline（override_pipeline 会覆盖 benchmark 用的副本）。
+    - benchmark_node 跑完后如果你想恢复原 pipeline，重新调一次 run_pipeline() 即可。
+""",
+)
+def benchmark_node(
+    controller_id: str,
+    pipeline_path: Union[str, List[str]],
+    node: str,
+    entry: Optional[str] = None,
+    iterations: int = 10,
+    resource_path: Optional[str] = None,
+) -> dict | str:
+    return _benchmark_node_impl(
+        controller_id, pipeline_path, node, entry, iterations, resource_path
+    )

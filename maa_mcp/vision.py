@@ -1,4 +1,6 @@
+import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Tuple, Union
 
 import cv2
@@ -259,6 +261,17 @@ def ocr(
     返回值：
     - 成功：返回截图文件的绝对路径，可通过 read_file 工具读取图片内容
     - 失败：返回 None
+
+    多模态裁图工作流（你 M3 可用）：
+    1. screencap(cid) → Read 源图 → 多模态识别目标元素（如按钮、图标、文字块）
+    2. 推断目标元素 region (x, y, w, h)——按设备原始分辨率想
+    3. screencap(cid, region=...) → 一步裁出
+    4. Read 裁剪结果 → 视觉验证是否为目标元素
+    5. 不满意就调 region 重试（UI 稳定时可多次迭代）
+    6. 用 save_captured_image(captured_path, bundle_root, subcategory, name)
+       把裁好的图存到项目 <bundle_root>/image/<子分类>/<元素名>.png。
+       bundle_root 是传给 Resource.post_bundle() 的目录（如 MAAGC 是
+       assets/resource/base/），路径与 TemplateMatch 的 template 字段读取路径一致。
 """,
 )
 def screencap(
@@ -267,3 +280,140 @@ def screencap(
     resolution: Optional[int] = 720,
 ) -> Optional[str]:
     return _screencap(controller_id, region, resolution)
+
+
+# ---------------------------------------------------------------------------
+# save_captured_image: 把已裁好的截图存到 MaaFramework 项目 bundle 的 image 目录
+# ---------------------------------------------------------------------------
+
+
+def _validate_path_segment(value: str, field_name: str) -> str:
+    """校验 subcategory / name 等路径段：非空、不含 ..、不是绝对路径。
+
+    Args:
+        value: 待校验的字符串。
+        field_name: 用于错误信息的字段名。
+
+    Returns:
+        去除首尾空白后的字符串。
+
+    Raises:
+        ValueError: 校验失败，错误信息含字段名和原因。
+    """
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} 必须是 str，实际类型: {type(value).__name__}")
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError(f"{field_name} 不能为空")
+    # 以路径分隔符开头视为可疑：在 POSIX 上是绝对路径，在 Windows 上
+    # 是相对当前盘根的相对路径，但用户的意图大概率是绝对路径，统一拒绝
+    if stripped.startswith(("/", "\\")):
+        raise ValueError(f"{field_name} 不能以路径分隔符开头: {value!r}")
+    # Path 内部规范化能处理 POSIX / Windows 分隔符；先看是否绝对
+    if Path(stripped).is_absolute():
+        raise ValueError(f"{field_name} 不能是绝对路径: {value!r}")
+    # 任何包含 .. 段的形式都拒绝（含 ../foo、foo/../bar、foo/..）
+    parts = Path(stripped).parts
+    if ".." in parts:
+        raise ValueError(f"{field_name} 不能包含 '..' 段: {value!r}")
+    return stripped
+
+
+def _save_captured_image(
+    captured_path: str,
+    bundle_root: Union[str, Path],
+    subcategory: str,
+    name: str,
+    overwrite: bool = False,
+) -> str:
+    """把已截好的 PNG 存到项目 MaaFramework bundle 的 image 目录。
+
+    目标路径：<bundle_root>/image/<subcategory>/<name>.png。
+    bundle_root 是传给 Resource.post_bundle() 的目录（与 MaaFramework
+    TemplateMatch 的 template 字段读取路径一致；MAAGC 的 bundle_root
+    是 assets/resource/base/）。
+
+    Args:
+        captured_path: screencap 返回的截图绝对路径。
+        bundle_root: 项目 bundle 根目录；不存在会自动创建。
+        subcategory: 模板分类子目录（如 UI/、Task/），可新建。
+        name: 模板元素名（不含 .png 后缀）。
+        overwrite: 目标已存在时是否覆盖；默认 False 保护已有模板。
+
+    Returns:
+        目标绝对路径字符串。
+
+    Raises:
+        ValueError: 参数校验失败（路径段非法）。
+    """
+    safe_subcategory = _validate_path_segment(subcategory, "subcategory")
+    safe_name = _validate_path_segment(name, "name")
+
+    src = Path(captured_path)
+    if not src.is_file():
+        raise ValueError(f"captured_path 不是有效文件: {captured_path}")
+
+    bundle_root_path = Path(bundle_root).expanduser()
+    target = bundle_root_path / "image" / safe_subcategory / f"{safe_name}.png"
+
+    if target.exists() and not overwrite:
+        raise ValueError(
+            f"目标已存在且 overwrite=False: {target.absolute()}（如需覆盖请显式传 overwrite=True）"
+        )
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(str(src), str(target))
+    return str(target.absolute())
+
+
+@mcp.tool(
+    name="save_captured_image",
+    description="""
+    把已裁好的截图（通常是 screencap(cid, region=...) 返回的 PNG 路径）存到
+    MaaFramework 项目 bundle 的 image 目录，作为 TemplateMatch 模板 / 节点测试素材。
+
+    参数：
+    - captured_path: 已存在的 PNG 文件绝对路径，通常是 screencap() 的返回值。
+    - bundle_root: 项目 bundle 根目录（传给 Resource.post_bundle() 的目录）。
+                   例如 MAAGC 用 "F:/workspace/MAAGC/assets/resource/base"；
+                   MaaFramework sample 用 "<repo>/sample/resource"。
+                   目录不存在会自动创建。
+    - subcategory: image 目录下的分类子目录（可新建），如 "UI"、"Task"、"MyFeature"。
+                   注意：这是路径段，禁止含 ".."、不能是绝对路径。
+    - name: 模板元素名（不含 .png 后缀），如 "ConfirmButton"、"CloseIcon"。
+                 同上：禁止含 ".."、不能是绝对路径。
+    - overwrite: 目标文件已存在时是否覆盖。默认 False 以保护已有模板；
+                 显式确认要覆盖时传 True。
+
+    返回值：
+    - 成功：返回写入的目标绝对路径字符串。
+    - 失败：返回错误信息字符串（含失败原因）。
+
+    典型工作流：
+    1. screencap(cid) → Read → 多模态识别目标 → 推断 region
+    2. screencap(cid, region=...) → 拿到 cropped 路径
+    3. Read 裁图视觉验证是不是预期元素
+    4. save_captured_image(cropped, bundle_root, subcategory, name)
+    5. 在 pipeline JSON 用 "template": "<subcategory>/<name>.png" 引用
+    6. （可选）benchmark_node() 跑 N 次验证阈值 / ROI
+
+    路径约定：
+    目标 = <bundle_root>/image/<subcategory>/<name>.png
+    与 TemplateMatch 的 template 字段读取路径（<bundle_root>/image/...）一致。
+""",
+)
+def save_captured_image(
+    captured_path: str,
+    bundle_root: Union[str, Path],
+    subcategory: str,
+    name: str,
+    overwrite: bool = False,
+) -> str:
+    try:
+        return _save_captured_image(
+            captured_path, bundle_root, subcategory, name, overwrite
+        )
+    except ValueError as e:
+        return f"参数错误: {e}"
+    except OSError as e:
+        return f"写入文件失败: {e}"
