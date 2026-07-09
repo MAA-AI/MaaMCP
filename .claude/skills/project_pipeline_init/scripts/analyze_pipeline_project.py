@@ -7,13 +7,17 @@ import argparse
 import json
 import re
 import sys
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 
 REFERENCE_FIELDS = ("next", "on_error", "interrupt")
+FLOW_MAX_DEPTH = 5
+FLOW_MAX_EDGES = 32
+FLOW_MAX_NODES = 36
+FLOW_MAX_TASKS = 20
 COMMON_NODE_RE = re.compile(
     r"(Back|Return|Exit|Close|Closed|Logout|Stop|Confirm|Cancel|Retry|Wait|"
     r"Flag|Popup|Start|Save|Home|Loading|Communicat|PowerLack|Check)",
@@ -359,6 +363,7 @@ def analyze_pipeline_files(project_root: Path, pipeline_files: list[Path]) -> di
     return {
         "node_count": len(node_defs),
         "node_definition_count": sum(len(defs) for defs in node_defs.values()),
+        "node_names": sorted(node_defs),
         "duplicate_nodes": duplicate_nodes,
         "file_summaries": file_summaries,
         "edges": [asdict(edge) for edge in edges],
@@ -428,6 +433,131 @@ def find_cycle_candidates(node_names: set[str], edges: list[Edge]) -> list[list[
     return components[:30]
 
 
+def trace_primary_path(
+    entry: str,
+    adjacency: dict[str, list[dict]],
+    node_names: set[str],
+    max_steps: int = 12,
+) -> list[str]:
+    if not entry:
+        return []
+    if entry not in node_names:
+        return [entry, "(missing entry)"]
+
+    path: list[str] = []
+    seen: set[str] = set()
+    current = entry
+    for _ in range(max_steps):
+        path.append(current)
+        if current in seen:
+            path.append("(cycle)")
+            break
+        seen.add(current)
+
+        next_edges = [
+            edge for edge in adjacency.get(current, []) if edge.get("field") == "next"
+        ]
+        if not next_edges:
+            break
+
+        current = next_edges[0]["target"]
+        if current not in node_names:
+            path.extend([current, "(unresolved)"])
+            break
+    return path
+
+
+def build_task_flow_graphs(
+    tasks: list[dict],
+    pipeline: dict,
+    max_depth: int = FLOW_MAX_DEPTH,
+    max_edges: int = FLOW_MAX_EDGES,
+    max_nodes: int = FLOW_MAX_NODES,
+    max_tasks: int = FLOW_MAX_TASKS,
+) -> list[dict]:
+    node_names = set(pipeline.get("node_names") or [])
+    unresolved = set(pipeline.get("unresolved_refs") or [])
+    adjacency: dict[str, list[dict]] = defaultdict(list)
+    for edge in pipeline.get("edges", []):
+        adjacency[edge["source"]].append(edge)
+
+    flows: list[dict] = []
+    for task in tasks[:max_tasks]:
+        entry = task.get("entry") or ""
+        node_order: list[str] = []
+        seen_nodes: set[str] = set()
+        selected_edges: list[dict] = []
+        selected_edge_keys: set[tuple[str, str, str, tuple[str, ...]]] = set()
+        truncated = False
+
+        def add_node(name: str) -> None:
+            if name and name not in seen_nodes:
+                seen_nodes.add(name)
+                node_order.append(name)
+
+        add_node(entry)
+        if entry in node_names:
+            queue: deque[tuple[str, int]] = deque([(entry, 0)])
+            expanded: set[str] = set()
+            while queue:
+                source, depth = queue.popleft()
+                if source in expanded:
+                    continue
+                expanded.add(source)
+
+                outgoing = adjacency.get(source, [])
+                if depth >= max_depth:
+                    if outgoing:
+                        truncated = True
+                    continue
+
+                for edge in outgoing:
+                    target = edge["target"]
+                    attrs = tuple(edge.get("attrs") or ())
+                    edge_key = (edge["source"], target, edge["field"], attrs)
+                    if edge_key in selected_edge_keys:
+                        continue
+                    if len(selected_edges) >= max_edges:
+                        truncated = True
+                        break
+                    if target not in seen_nodes and len(seen_nodes) >= max_nodes:
+                        truncated = True
+                        break
+
+                    selected_edge_keys.add(edge_key)
+                    selected_edges.append(
+                        {
+                            "source": edge["source"],
+                            "target": target,
+                            "field": edge["field"],
+                            "attrs": list(attrs),
+                        }
+                    )
+                    add_node(target)
+                    if target in node_names and target not in expanded:
+                        queue.append((target, depth + 1))
+
+        flows.append(
+            {
+                "task": task.get("name") or "<unnamed>",
+                "entry": entry,
+                "repeatable": task.get("repeatable", False),
+                "entry_found": entry in node_names,
+                "depth_limit": max_depth,
+                "edge_limit": max_edges,
+                "node_limit": max_nodes,
+                "node_count": len(node_order),
+                "edge_count": len(selected_edges),
+                "truncated": truncated,
+                "primary_path": trace_primary_path(entry, adjacency, node_names),
+                "unresolved_refs": sorted(name for name in node_order if name in unresolved),
+                "nodes": node_order,
+                "edges": selected_edges,
+            }
+        )
+    return flows
+
+
 def summarize_images(project_root: Path, resource_dirs: list[Path], image_files: list[Path]) -> dict:
     by_resource = Counter()
     by_dir = Counter()
@@ -487,6 +617,7 @@ def analyze_project(project_root: str | Path) -> dict:
         for item in interface.get("task", []) or []
         if isinstance(item, dict)
     ]
+    pipeline["task_flow_graphs"] = build_task_flow_graphs(tasks, pipeline)
 
     return {
         "project_root": str(root),
@@ -516,6 +647,89 @@ def render_table(headers: list[str], rows: list[list[Any]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def mermaid_label(value: Any, max_len: int = 64) -> str:
+    text = display_value(value, max_len=max_len)
+    return (
+        text.replace("\\", "/")
+        .replace('"', "'")
+        .replace("[", "(")
+        .replace("]", ")")
+        .replace("{", "(")
+        .replace("}", ")")
+        .replace("|", "/")
+    )
+
+
+def flow_edge_label(edge: dict) -> str:
+    label = edge.get("field") or "edge"
+    attrs = edge.get("attrs") or []
+    if attrs:
+        label = f"{label} {','.join(attrs)}"
+    return mermaid_label(label, max_len=40)
+
+
+def render_task_flow_mermaid(flow: dict) -> str:
+    if not flow.get("nodes"):
+        return "_No graph nodes detected._\n"
+
+    node_ids = {name: f"N{idx}" for idx, name in enumerate(flow["nodes"])}
+    unresolved = set(flow.get("unresolved_refs") or [])
+    lines = ["```mermaid", "flowchart TD"]
+    for name in flow["nodes"]:
+        suffix = " (?)" if name in unresolved else ""
+        lines.append(f'    {node_ids[name]}["{mermaid_label(name + suffix)}"]')
+
+    for edge in flow.get("edges", []):
+        source_id = node_ids.get(edge["source"])
+        target_id = node_ids.get(edge["target"])
+        if not source_id or not target_id:
+            continue
+        label = flow_edge_label(edge)
+        if edge.get("field") == "next":
+            lines.append(f"    {source_id} -- {label} --> {target_id}")
+        else:
+            lines.append(f"    {source_id} -. {label} .-> {target_id}")
+
+    if unresolved:
+        lines.append("    classDef unresolved fill:#fff3cd,stroke:#b7791f,color:#1f2933")
+        lines.append(
+            "    class "
+            + ",".join(node_ids[name] for name in flow["nodes"] if name in unresolved)
+            + " unresolved"
+        )
+
+    lines.append("```")
+    return "\n".join(lines) + "\n"
+
+
+def render_task_flow_sections(flows: list[dict], max_flows: int = FLOW_MAX_TASKS) -> str:
+    if not flows:
+        return "_None detected._\n"
+
+    lines: list[str] = []
+    for flow in flows[:max_flows]:
+        task_name = flow.get("task") or "<unnamed>"
+        entry = flow.get("entry") or "<missing>"
+        path = " -> ".join(flow.get("primary_path") or []) or "None detected"
+        lines.extend(
+            [
+                f"#### {task_name} (`{entry}`)",
+                "",
+                f"- 入口节点存在: {flow.get('entry_found')}",
+                f"- 主路径: `{path}`",
+                (
+                    f"- 图规模: {flow.get('node_count', 0)} nodes / "
+                    f"{flow.get('edge_count', 0)} edges"
+                    + ("，已截断" if flow.get("truncated") else "")
+                ),
+                f"- 未解析引用: {', '.join(flow.get('unresolved_refs') or []) or 'None detected'}",
+                "",
+                render_task_flow_mermaid(flow),
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
 def render_summary(analysis: dict) -> str:
     pipeline = analysis["pipeline"]
     image_summary = analysis["image_summary"]
@@ -537,6 +751,21 @@ def render_summary(analysis: dict) -> str:
         render_table(
             ["Task", "Entry", "Repeatable"],
             [[t["name"], t["entry"], t["repeatable"]] for t in analysis["tasks"][:30]],
+        ),
+        "## Entry Flow Previews",
+        render_table(
+            ["Task", "Entry", "Found", "Primary Path", "Graph"],
+            [
+                [
+                    flow["task"],
+                    flow["entry"],
+                    flow["entry_found"],
+                    " -> ".join(flow.get("primary_path") or []),
+                    f"{flow['node_count']} nodes / {flow['edge_count']} edges"
+                    + ("; truncated" if flow.get("truncated") else ""),
+                ]
+                for flow in pipeline.get("task_flow_graphs", [])[:15]
+            ],
         ),
         "## Top Pipeline Files",
         render_table(
@@ -660,6 +889,11 @@ def render_basic_info(analysis: dict) -> str:
             ["File", "Nodes"],
             [[item["file"], item["node_count"]] for item in pipeline["file_summaries"][:30]],
         ),
+        "### 入口主链路流程图",
+        "",
+        "从 `interface.json` 的 task entry 出发，按 `next/on_error/interrupt` 展开有限深度流程图；公共返回、确认、退出节点会自然出现在图中。",
+        "",
+        render_task_flow_sections(pipeline.get("task_flow_graphs", [])),
         "## 4. 公共基础节点",
         "",
         "这些节点通常被多条链路引用，或名称/行为显示它们是通用 UI 控制节点。",

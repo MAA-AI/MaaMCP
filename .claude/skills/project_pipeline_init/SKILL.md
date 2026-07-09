@@ -1,6 +1,6 @@
 ---
 name: project-pipeline-init
-description: Scan and initialize a MaaFramework game or app automation project for MaaMCP usage. Use when asked for project_pipeline_init, basic_info.md, researching a game repo, scanning pipeline nodes, finding common Back/Return/Exit/Confirm nodes, mapping pipeline node relationships, summarizing TemplateMatch image assets, OCR expected text conventions, resource groups, task entries, or reducing token cost for future Maa skill / MaaMCP work.
+description: Scan and initialize a MaaFramework game or app automation project for MaaMCP usage. Use when asked for project_pipeline_init, basic_info.md, researching a game repo, scanning pipeline nodes, finding common Back/Return/Exit/Confirm nodes, mapping pipeline node relationships, generating entry task flowcharts / Mermaid diagrams, summarizing TemplateMatch image assets, OCR expected text conventions, resource groups, task entries, or reducing token cost for future Maa skill / MaaMCP work.
 ---
 
 # project_pipeline_init
@@ -27,6 +27,7 @@ Do not run this skill against MaaMCP itself unless the user explicitly asks to a
    - pipeline file count and unique node count
    - high in-degree common nodes
    - Back / Return / Exit / Close / Confirm / Wait / Flag nodes
+   - entry task flowcharts and primary path previews
    - unresolved references, isolated nodes, and cycle candidates
    - image directory inventory and TemplateMatch usage
 
@@ -65,6 +66,16 @@ Support these node reference forms:
 - prefixed strings: `"[JumpBack]BackText"`, `"[Anchor]SomeNode"`
 
 Strip bracket prefixes when resolving the target node, but preserve the prefix in summaries where useful.
+
+## Entry Flowcharts
+
+Generate bounded Mermaid flowcharts from each `interface.json` task entry. These diagrams are meant to orient MaaMCP and future skills quickly, not to replace a full graph database.
+
+- Start from the task `entry` node.
+- Expand `next`, `on_error`, and `interrupt` edges with edge labels.
+- Preserve branch hints such as `JumpBack`, `jump_back`, and `anchor` in edge labels.
+- Limit depth and edge count so loops and shared utility nodes do not overwhelm `basic_info.md`.
+- Include a short primary path text summary for agents that cannot render Mermaid.
 
 ## Public Node Detection
 

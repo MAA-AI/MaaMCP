@@ -14,6 +14,10 @@
 
 <!-- TODO: 列出主流程文件、入口节点、节点数量、主要业务域。 -->
 
+### 入口主链路流程图
+
+<!-- TODO: 从 interface.json task entry 出发生成 Mermaid 流程图，并人工确认主路径、分支、循环和返回/退出节点。 -->
+
 ## 4. 公共基础节点
 
 <!-- TODO: 列出高复用节点，如 BackText、ConfirmButton、ReturnHall、GameLoading。 -->

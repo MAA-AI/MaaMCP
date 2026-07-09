@@ -162,6 +162,7 @@ def test_analyze_project_finds_entries_edges_common_nodes_and_images(tmp_path: P
     assert pipeline["edge_type_counts"]["interrupt"] == 1
     assert "MissingNode" in pipeline["unresolved_refs"]
     assert ["SelfLoop"] in pipeline["cycle_candidates"]
+    assert "Start" in pipeline["node_names"]
 
     common_names = {item["name"] for item in pipeline["common_nodes"]}
     return_names = {item["name"] for item in pipeline["return_exit_nodes"]}
@@ -172,6 +173,16 @@ def test_analyze_project_finds_entries_edges_common_nodes_and_images(tmp_path: P
     assert "ConfirmButton" in confirm_names
     assert result["image_summary"]["image_count"] == 3
     assert any(item["dir"].endswith("utils") for item in result["image_summary"]["top_dirs"])
+
+    flows = {flow["entry"]: flow for flow in pipeline["task_flow_graphs"]}
+    start_flow = flows["Start"]
+    assert start_flow["entry_found"] is True
+    assert "TaskNode" in start_flow["nodes"]
+    assert "MissingNode" in start_flow["unresolved_refs"]
+    assert start_flow["primary_path"][:2] == ["Start", "TaskNode"]
+    assert any(edge["field"] == "on_error" for edge in start_flow["edges"])
+    assert any(edge["field"] == "interrupt" for edge in start_flow["edges"])
+    assert any("JumpBack" in edge["attrs"] for edge in start_flow["edges"])
 
 
 def test_render_and_write_basic_info_refuses_existing_file(tmp_path: Path):
@@ -186,6 +197,8 @@ def test_render_and_write_basic_info_refuses_existing_file(tmp_path: Path):
     assert "ConfirmButton" in content
     assert "MissingNode" in content
     assert "TemplateMatch" in content
+    assert "入口主链路流程图" in content
+    assert "flowchart TD" in content
 
     written = analyzer.write_basic_info(result)
     assert written == root / "basic_info.md"
