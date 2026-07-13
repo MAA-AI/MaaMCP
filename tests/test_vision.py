@@ -330,10 +330,18 @@ class TestValidatePathSegment:
             _validate_path_segment("/abs/path", "name")
 
     def test_windows_drive_letter_rejected(self):
-        # 在 Windows 上 Path("C:\\foo").is_absolute() == True，已被绝对路径分支兜住
-        # 这里只保证它抛 ValueError（不被当作合法相对路径接受）
-        with pytest.raises(ValueError):
-            _validate_path_segment("C:\\foo", "name")
+        for value in ("C:\\foo", "C:/foo"):
+            with pytest.raises(ValueError, match="不能是绝对路径"):
+                _validate_path_segment(value, "name")
+
+    def test_windows_drive_relative_path_rejected(self):
+        with pytest.raises(ValueError, match="Windows 驱动器前缀"):
+            _validate_path_segment("C:foo", "name")
+
+    def test_windows_separator_traversal_rejected(self):
+        for value in ("..\\foo", "foo\\..\\bar"):
+            with pytest.raises(ValueError, match=r"不能包含 '\.\.' 段"):
+                _validate_path_segment(value, "name")
 
     def test_leading_separator_rejected(self):
         """以 / 或 \\ 开头的串视为可疑（Windows 上 /abs 是相对路径但意图是绝对）。"""

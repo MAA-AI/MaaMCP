@@ -1,6 +1,6 @@
 import shutil
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Optional, Tuple, Union
 
 import cv2
@@ -309,12 +309,18 @@ def _validate_path_segment(value: str, field_name: str) -> str:
     # 是相对当前盘根的相对路径，但用户的意图大概率是绝对路径，统一拒绝
     if stripped.startswith(("/", "\\")):
         raise ValueError(f"{field_name} 不能以路径分隔符开头: {value!r}")
-    # Path 内部规范化能处理 POSIX / Windows 分隔符；先看是否绝对
-    if Path(stripped).is_absolute():
+    # 资源路径可能在不同操作系统间共享，因此同时按 POSIX 和
+    # Windows 语义校验，避免把 C:\foo 在 POSIX 上当成普通相对路径。
+    posix_path = PurePosixPath(stripped)
+    windows_path = PureWindowsPath(stripped)
+    if posix_path.is_absolute() or windows_path.is_absolute():
         raise ValueError(f"{field_name} 不能是绝对路径: {value!r}")
+    # C:foo 是 Windows 驱动器相对路径，虽不是绝对路径，也不应被
+    # 作为可移植的 bundle 内部路径接受。
+    if windows_path.drive:
+        raise ValueError(f"{field_name} 不能包含 Windows 驱动器前缀: {value!r}")
     # 任何包含 .. 段的形式都拒绝（含 ../foo、foo/../bar、foo/..）
-    parts = Path(stripped).parts
-    if ".." in parts:
+    if ".." in posix_path.parts or ".." in windows_path.parts:
         raise ValueError(f"{field_name} 不能包含 '..' 段: {value!r}")
     return stripped
 
