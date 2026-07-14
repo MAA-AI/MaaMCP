@@ -470,8 +470,4 @@ output
 .claude/issue_*.json
 .claude/skills/*
 !.claude/skills/
-!.claude/skills/project_pipeline_init/
-!.claude/skills/project_pipeline_init/**
-.claude/skills/project_pipeline_init/**/__pycache__/
-.claude/skills/project_pipeline_init/**/*.pyc
 comment.txt
