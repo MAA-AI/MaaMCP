@@ -77,7 +77,7 @@ Talk is cheap, see: **[🎞️ Bilibili Video Demo](https://www.bilibili.com/vid
 - `get_pipeline_protocol` - Get Pipeline protocol documentation
 - `save_pipeline` - Save Pipeline JSON to file (supports creating and updating)
 - `load_pipeline` - Load an existing Pipeline file
-- `run_pipeline` - Run Pipeline and return execution results (single/multi-file, auto-start Custom action agent)
+- `run_pipeline` - Run Pipeline and return execution results (single/multi-file, auto-start Custom action agent, per-run `pipeline_override`, tool-side `timeout_seconds`)
 
 ### 🛑 Pipeline Termination
 
@@ -281,6 +281,27 @@ After Pipeline generation, AI automatically validates and optimizes:
 4. **Re-validate** - Run again after modifications until it consistently succeeds
 
 If the Pipeline logic itself needs adjustment, AI can re-execute automation operations and combine old and new experiences to generate a more robust Pipeline.
+
+### Fast Single-Node Verification (pipeline_override + timeout_seconds)
+
+When debugging a single node, there is no need to repeatedly edit the pipeline file, suffer slow full-screen recognition, or let the call block forever:
+
+```python
+run_pipeline(
+    controller_id,
+    "main.json",
+    entry="ClickSettings",                  # enter from the node under test
+    start_agent=False,                      # recognition only, no CustomAction chain
+    pipeline_override={                     # per-run only: no file edits, Resource untouched
+        "ClickSettings": {"roi": [520, 20, 200, 80], "timeout": 3000}
+    },
+    timeout_seconds=10,                     # tool-side cap: auto post_stop after 10s
+)
+```
+
+- `pipeline_override` uses the same mechanism as interface.json's field: **field-level merge** into loaded nodes; any field (`expected` / `threshold` / `enabled` / ...) can be overridden — and the tighter the ROI, the faster each recognition
+- On timeout the result carries `status="timeout"` plus the nodes executed before the stop, showing exactly where it hung
+- `benchmark_node` accepts the same `pipeline_override`, making tuning loops file-edit-free
 
 ### Example Output
 

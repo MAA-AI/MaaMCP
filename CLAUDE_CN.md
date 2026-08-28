@@ -168,6 +168,8 @@ OCR 模型和截图存储在平台特定的目录中：
 - __别把"测试污染"误判成"工具 bug"__——工具用过一次后又失败，先检查测试状态（是否切窗、是否手动操作、controller 是否失效），再怀疑工具本身。
 - __`save_captured_image` 写入项目 bundle，不是 MaaMCP 数据目录__——目标是 `<bundle_root>/image/<子分类>/<元素名>.png`（TemplateMatch 的 `template` 字段读取路径）。`bundle_root` 是传给 `Resource.post_bundle()` 的目录：MAAGC 是 `assets/resource/base/`；MaaFramework sample 是 `<repo>/sample/resource`。默认 `overwrite=False` 保护已有模板，更新时显式传 `True`。
 - __`benchmark_node` 测的是 wall-clock，不是单节点耗时__——返回的 `latency_ms` 是 `post_task → TaskDetail` 总耗时，含 entry 识别开销（~50-200ms）。想估节点本身耗时减掉这段基线。`mean_score=None` 且 `successes=0` 表示一次都没命中——通常是阈值/ROI/模板漂移的信号。
+- __`run_pipeline` / `benchmark_node` 支持单次 `pipeline_override`__——字段级节点覆盖，直接传给 `post_task`（与 interface.json 的 `pipeline_override` 同机制）：单节点验证时收紧 `roi`、调 `expected`/`threshold`/`timeout`，不用改 pipeline 文件。只对单次运行生效——Resource 不被污染。覆盖的节点名若不在已加载文件中会出现在 `warnings`（拼错节点名时覆盖静默不生效，记得检查）。`benchmark_node` 拒绝覆盖 entry/target 的 `next`（会破坏隔离链路）。
+- __`run_pipeline` 支持工具侧 `timeout_seconds`__——轮询任务状态，超时调 `post_stop()`，返回 `status="timeout"` + 部分节点详情，不再无限阻塞 MCP 调用（识别不命中的节点会烧满自己的 `timeout`，默认 20s）。注意：MaaFramework 把被 stop 的任务自身 status 标记为 succeeded——工具显式报 `"timeout"`，不信任它。单节点验证建议 5-15s；`None`（默认）保持旧的不限时行为。
 
 ### Pipeline 节点调参循环
 
@@ -179,7 +181,7 @@ TemplateMatch / OCR / ColorMatch 节点不稳定时，按这个循环迭代（is
 4. `save_captured_image(cropped_path, bundle_root, subcategory, name)` → 提到 TemplateMatch 模板
 5. pipeline JSON 里写：`"recognition": "TemplateMatch", "template": "<subcategory>/<name>.png"`
 6. `benchmark_node(cid, pipeline_path, node=<name>, iterations=10..50)` → 看 `mean_score`、`latency_ms`、`all_results_samples`
-7. `mean_score < 0.85` 或 `successes < iterations`：收紧 ROI（缩 `region`）、抬高 `threshold`、或重新截一张更准的模板
+7. `mean_score < 0.85` 或 `successes < iterations`：收紧 ROI（缩 `region`）、抬高 `threshold`、或重新截一张更准的模板——先用 `pipeline_override={"<name>": {"roi": [...], "threshold": ...}}` 免改文件试参，确定后再把最终值写回 pipeline JSON
 8. 重复 2-7 直到稳定
 
 MaaMCP 侧 pipeline infra 集成测试见 `tests/test_dbg_pipeline.py`（标 `@pytest.mark.integration`；缺 `MaaDbgControlUnit` DLL 时自动 skip）。

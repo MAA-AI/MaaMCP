@@ -77,7 +77,7 @@ Talk is cheap, 请看: **[🎞️ Bilibili 视频演示](https://www.bilibili.co
 - `get_pipeline_protocol` - 获取 Pipeline 协议文档
 - `save_pipeline` - 保存 Pipeline JSON 到文件（支持新建和更新）
 - `load_pipeline` - 读取已有的 Pipeline 文件
-- `run_pipeline` - 运行 Pipeline 并返回执行结果（支持单/多文件、Custom action agent 自动启动）
+- `run_pipeline` - 运行 Pipeline 并返回执行结果（支持单/多文件、Custom action agent 自动启动、单次 `pipeline_override` 参数覆盖、工具侧 `timeout_seconds` 超时）
 
 ### 🛑 Pipeline 终止
 
@@ -379,6 +379,28 @@ run_pipeline(
 - 节点冲突默认 `strict` 模式（不写入 Resource）；可设为 `overwrite` 允许后文件覆盖
 - 加载是原子的：所有预校验通过后才写入 Resource
 - 节点驻留：已加载的节点持续驻留，切换 pipeline 集时调用 `clear_pipeline_resources()` 重置
+
+### 单节点快速验证（pipeline_override + timeout_seconds）
+
+调试单个节点时，不必反复改 pipeline 文件，也不必忍受整屏识别慢扫或无限阻塞：
+
+```python
+run_pipeline(
+    controller_id,
+    "main.json",
+    entry="点击设置",                        # 只从被测节点进入
+    start_agent=False,                       # 只测识别，不拉起 CustomAction 链
+    pipeline_override={                      # 单次生效：不写文件、不污染 Resource
+        "点击设置": {"roi": [520, 20, 200, 80], "timeout": 3000}
+    },
+    timeout_seconds=10,                      # 工具侧超时：超过 10s 自动 post_stop
+)
+```
+
+- `pipeline_override` 与 interface.json 的同名机制一致：**按字段合并**到已加载节点，
+  也可覆盖 `expected` / `threshold` / `enabled` 等任意字段；ROI 越准单次识别越快
+- 超时返回 `status="timeout"` + 超时前已执行的节点详情，方便定位挂在哪个节点
+- `benchmark_node` 同样支持 `pipeline_override`，调参循环免改文件
 
 ## 注意事项
 

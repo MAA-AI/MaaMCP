@@ -8,6 +8,7 @@ Pipeline 生成支持模块
 """
 
 import json
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -608,6 +609,124 @@ def _validate_entry(
     return entry
 
 
+def _validate_timeout_seconds(timeout_seconds: Optional[float]) -> None:
+    """校验工具侧超时参数：None（不限时）或正的有限数值（秒）。
+
+    NaN / inf 必须拒绝：deadline = monotonic() + NaN 之后 "now >= deadline"
+    永远为 False，超时分支不可达——等于静默禁用超时还带 CPU 空转轮询。
+    JSON 层（jiter/pydantic）接受 NaN/Infinity/1e400，所以这里必须自己拦。
+
+    Raises:
+        ValueError: 非 None 且不是正的有限数值（bool、NaN、±inf、
+            超出 float 范围的巨大整数都视为非法）。
+    """
+    if timeout_seconds is None:
+        return
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)):
+        raise ValueError(
+            f"timeout_seconds 必须是正数（秒）或 None，实际: {timeout_seconds!r}"
+        )
+    try:
+        value = float(timeout_seconds)
+    except OverflowError:
+        value = float("inf")
+    if not math.isfinite(value):
+        raise ValueError(
+            f"timeout_seconds 必须是有限数值（NaN/inf 会静默禁用超时），"
+            f"实际: {timeout_seconds!r}"
+        )
+    if value <= 0:
+        raise ValueError(f"timeout_seconds 必须 > 0，实际: {timeout_seconds!r}")
+
+
+def _validate_pipeline_override(pipeline_override: Optional[dict]) -> dict:
+    """校验 pipeline_override 结构：dict[节点名(str) → 字段 dict]。
+
+    只做结构校验，不校验节点名是否存在（未知节点名的提示见
+    _unknown_override_nodes——覆盖可以指向 bundle 资源里的节点或新增节点，
+    所以未知名是 warning 不是 error）。
+
+    Returns:
+        规范化后的 override dict；None 输入返回空 dict。
+
+    Raises:
+        ValueError: 结构非法（顶层非 dict / 键非字符串 / 节点值非 dict）。
+    """
+    if pipeline_override is None:
+        return {}
+    if not isinstance(pipeline_override, dict):
+        raise ValueError(
+            f"pipeline_override 必须是 dict（节点名 → 字段 dict），"
+            f"实际类型: {type(pipeline_override).__name__}"
+        )
+    for name, fields in pipeline_override.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError(
+                f"pipeline_override 的键必须是非空字符串节点名，实际: {name!r}"
+            )
+        if not isinstance(fields, dict):
+            raise ValueError(
+                f"pipeline_override[{name!r}] 必须是字段 dict，"
+                f"实际类型: {type(fields).__name__}"
+            )
+    return pipeline_override
+
+
+def _unknown_override_nodes(pipeline_override: dict, merged: dict) -> List[str]:
+    """找出 override 中不在本次加载文件节点表里的节点名，生成提示 warning。
+
+    未知节点名不阻断执行：它可能指向 bundle 资源中已有的节点，也可能是
+    override 新增的节点（MaaFramework 均支持）。warning 只用于帮助发现拼写错误
+    （拼错节点名时覆盖会静默不生效，是最常见的踩坑点）。
+    """
+    unknown = sorted(n for n in pipeline_override if n not in merged)
+    return [
+        f"pipeline_override 节点 {n!r} 不在本次加载的文件节点表中"
+        f"（可能来自 bundle 资源或为新增节点；若是想覆盖已加载节点，请检查拼写）"
+        for n in unknown
+    ]
+
+
+_TIMEOUT_POLL_INTERVAL_S = 0.05
+
+
+def _wait_task_with_timeout(
+    tasker: Any,
+    task_job: Any,
+    timeout_seconds: Optional[float],
+    poll_interval: float = _TIMEOUT_POLL_INTERVAL_S,
+) -> tuple[Any, bool]:
+    """等待任务完成；超过 timeout_seconds 则 post_stop() 主动停止。
+
+    timeout_seconds=None 时保持旧行为：task_job.wait() 无限阻塞。
+    超时路径：tasker.post_stop().wait() 确保任务终止后，再取一次
+    TaskDetail——它携带超时前已执行的部分节点详情，便于诊断挂在哪个节点。
+
+    Args:
+        tasker: maafw Tasker（超时时用它 post_stop）。
+        task_job: tasker.post_task 返回的 TaskJob。
+        timeout_seconds: 工具侧超时（秒）；None 表示不限时。
+        poll_interval: 轮询间隔（秒）。
+
+    Returns:
+        (task_detail 或 None, timed_out)
+    """
+    if timeout_seconds is None:
+        return task_job.wait().get(), False
+
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if task_job.done:
+            return task_job.get(), False
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(poll_interval)
+
+    tasker.post_stop().wait()
+    # stop 完成后任务已终止，wait() 立即返回；detail 含部分执行的节点
+    return task_job.wait().get(), True
+
+
 def _parse_task_status(status: Any) -> str:
     """将 MaaFramework TaskDetail.status 映射为可读字符串。"""
     if status.succeeded:
@@ -623,16 +742,11 @@ def _parse_task_status(status: Any) -> str:
     return str(status)
 
 
-def _build_run_result(
-    file_dicts: List[tuple[str, dict]],
-    entry_node: str,
-    merged: dict,
-    task_detail: Any,
-    conflicts: List[str],
-    on_conflict: ConflictStrategy,
-) -> PipelineLoadResult:
-    """组装 run_pipeline 的返回结果。"""
+def _extract_nodes_info(task_detail: Any) -> List[dict]:
+    """从 TaskDetail 抽取节点执行详情列表；detail 为 None 或无节点时返回空 list。"""
     nodes_info: List[dict] = []
+    if task_detail is None:
+        return nodes_info
     if hasattr(task_detail, "nodes") and task_detail.nodes:
         for node in task_detail.nodes:
             node_info: dict = {}
@@ -643,10 +757,29 @@ def _build_run_result(
             if hasattr(node, "name"):
                 node_info["name"] = node.name
             nodes_info.append(node_info)
+    return nodes_info
 
-    warnings: List[str] = []
+
+def _conflict_warnings(
+    conflicts: List[str], on_conflict: ConflictStrategy
+) -> List[str]:
+    """OVERWRITE 模式下把冲突节点名转成 warning 文案；其余模式返回空 list。"""
     if on_conflict == ConflictStrategy.OVERWRITE and conflicts:
-        warnings = [f"节点冲突（后文件覆盖前文件）: {n}" for n in conflicts]
+        return [f"节点冲突（后文件覆盖前文件）: {n}" for n in conflicts]
+    return []
+
+
+def _build_run_result(
+    file_dicts: List[tuple[str, dict]],
+    entry_node: str,
+    merged: dict,
+    task_detail: Any,
+    conflicts: List[str],
+    on_conflict: ConflictStrategy,
+    extra_warnings: Optional[List[str]] = None,
+) -> PipelineLoadResult:
+    """组装 run_pipeline 的返回结果。"""
+    warnings = _conflict_warnings(conflicts, on_conflict) + list(extra_warnings or [])
 
     return PipelineLoadResult(
         success=bool(task_detail.status.succeeded),
@@ -655,7 +788,7 @@ def _build_run_result(
         entry=entry_node,
         status=_parse_task_status(task_detail.status),
         task_id=task_detail.task_id,
-        nodes=nodes_info,
+        nodes=_extract_nodes_info(task_detail),
         warnings=warnings,
     )
 
@@ -818,6 +951,22 @@ def save_pipeline(
         - "strict" (默认): 检测到任何节点冲突立即返回错误，不写入 Resource
         - "overwrite": 后加载的整节点覆盖先加载的（与 MaaFramework 行为一致），
                        冲突节点名会出现在返回的 warnings 中
+    - pipeline_override: 单次运行的节点参数覆盖（可选）。dict 格式：节点名 → 字段 dict。
+      按字段级合并到已加载的 pipeline（与 interface.json 的 pipeline_override 同机制），
+      只对本次执行生效——不写入 Resource、不修改 pipeline 文件。
+      典型用法——单节点快速验证（只截 ROI 区域验证，避免整屏 OCR 慢扫）：
+        run_pipeline(cid, "p.json", entry="MyNode", start_agent=False,
+                     pipeline_override={"MyNode": {"roi": [x, y, w, h], "timeout": 3000}},
+                     timeout_seconds=10)
+      ROI 越准单次识别越快；配合节点级 timeout（毫秒）与工具级 timeout_seconds 双保险。
+      也可覆盖 expected / threshold / enabled 等任意节点字段，或新增临时节点。
+      覆盖的节点名若不在本次加载的文件节点表中，会出现在返回的 warnings 里
+      （可能来自 bundle 资源或为新增节点；主要帮助发现拼写错误——拼错时覆盖会静默不生效）。
+    - timeout_seconds: 工具侧执行超时（秒，可选；默认 None = 不限时，保持旧行为）。
+      超过该时长自动调用 post_stop() 停止任务，并返回 status="timeout" 的结构化结果
+      （含超时前已执行的部分节点详情），不再让 MCP 调用无限阻塞。
+      单节点验证建议 5~15；完整业务流程按需放宽或不设。
+      超时只停当前任务；后台 agent 子进程如需一并清理，另行调用 stop_pipeline()。
 
     返回值：
     - 成功/失败统一返回 PipelineLoadResult 序列化后的 dict，包含以下字段：
@@ -825,7 +974,7 @@ def save_pipeline(
       - files: 实际加载的文件绝对路径列表
       - node_count: 合并后写入 Resource 的节点总数
       - entry: 入口节点名称
-      - status: 执行状态字符串（"succeeded" | "failed" | "running" | "pending" | "done"）
+      - status: 执行状态字符串（"succeeded" | "failed" | "running" | "pending" | "done" | "timeout"）
       - task_id: 任务 ID
       - nodes: 节点详情列表
         - name: 节点名称
@@ -881,7 +1030,16 @@ def run_pipeline(
     resource_path: Optional[str] = None,
     on_conflict: str = ConflictStrategy.STRICT.value,
     start_agent: bool = True,
+    pipeline_override: Optional[dict] = None,
+    timeout_seconds: Optional[float] = None,
 ) -> dict | str:
+    # 0. 新参数结构预校验（纯校验，先于任何全局状态修改）
+    try:
+        _validate_timeout_seconds(timeout_seconds)
+        override_dict = _validate_pipeline_override(pipeline_override)
+    except ValueError as e:
+        return f"参数错误: {e}"
+
     # 如果传入了 resource_path，添加它以便 get_or_create_resource 加载该路径
     if resource_path:
         add_resource_path(resource_path)
@@ -953,9 +1111,31 @@ def run_pipeline(
                 f"identifier={agent_ctx.identifier}"
             )
 
-    # 6. 执行任务
-    task_job = tasker.post_task(entry_node)
-    task_detail = task_job.wait().get()
+    # 6. 执行任务（可选：单次 pipeline_override + 工具侧超时）
+    override_warnings = _unknown_override_nodes(override_dict, merged)
+    task_job = tasker.post_task(entry_node, override_dict)
+    task_detail, timed_out = _wait_task_with_timeout(
+        tasker, task_job, timeout_seconds
+    )
+
+    if timed_out:
+        return PipelineLoadResult(
+            success=False,
+            files=[f for f, _ in file_dicts],
+            node_count=len(merged),
+            entry=entry_node,
+            status="timeout",
+            task_id=getattr(task_detail, "task_id", 0) if task_detail else 0,
+            nodes=_extract_nodes_info(task_detail),
+            warnings=_conflict_warnings(conflicts, strategy) + override_warnings,
+            error=(
+                f"任务执行超过 timeout_seconds={timeout_seconds}s，"
+                "已调用 post_stop() 主动停止。常见原因：某节点识别一直未命中"
+                "（roi 偏了 / expected 不匹配 / threshold 过高）。"
+                "建议先 screencap 看实际画面，再用 pipeline_override 收紧 roi 重试。"
+                "nodes 字段包含超时前已执行的部分节点详情。"
+            ),
+        ).to_dict()
 
     if not task_detail:
         return "任务执行失败，无法获取执行详情"
@@ -968,6 +1148,7 @@ def run_pipeline(
         task_detail=task_detail,
         conflicts=conflicts,
         on_conflict=strategy,
+        extra_warnings=override_warnings,
     ).to_dict()
 
 
@@ -1078,6 +1259,7 @@ class BenchmarkRunResult:
     - latency_ms: 每次 post_task 到拿到 TaskDetail 的总耗时（毫秒，整数）
     - all_results_samples: 前 3 次的 all_results 采样（每项 box + score），
       方便快速排查识别漂移
+    - warnings: 警告信息（如 pipeline_override 中的未知节点名）；为空时不序列化
     """
 
     node: str
@@ -1088,9 +1270,10 @@ class BenchmarkRunResult:
     mean_score: Optional[float]
     latency_ms: List[int]
     all_results_samples: List[List[dict]]
+    warnings: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             "node": self.node,
             "iterations": self.iterations,
             "successes": self.successes,
@@ -1100,6 +1283,9 @@ class BenchmarkRunResult:
             "latency_ms": list(self.latency_ms),
             "all_results_samples": [list(s) for s in self.all_results_samples],
         }
+        if self.warnings:
+            result["warnings"] = list(self.warnings)
+        return result
 
 
 _BENCHMARK_DONE_NODE = "_BenchmarkDone"
@@ -1193,12 +1379,14 @@ def _summarize_iteration(node_detail: Any, target_name: str) -> tuple[Optional[f
 def _aggregate_benchmark(
     target_name: str,
     per_iter: List[tuple[Optional[float], List[dict], int]],
+    warnings: Optional[List[str]] = None,
 ) -> BenchmarkRunResult:
     """聚合多次迭代结果。
 
     Args:
         target_name: 被测节点名
         per_iter: [(score, sample, latency_ms), ...]
+        warnings: 附加警告信息（可选）
 
     Returns:
         BenchmarkRunResult 实例。
@@ -1215,6 +1403,7 @@ def _aggregate_benchmark(
         mean_score=(sum(scores) / len(scores)) if scores else None,
         latency_ms=latencies,
         all_results_samples=samples,
+        warnings=list(warnings or []),
     )
 
 
@@ -1225,23 +1414,30 @@ def _benchmark_node_impl(
     entry: Optional[str] = None,
     iterations: int = 10,
     resource_path: Optional[str] = None,
+    pipeline_override: Optional[dict] = None,
 ) -> dict | str:
     """benchmark_node 的核心实现（不含 @mcp.tool 装饰，便于单测 + 复用）。
 
     行为：
-    1. 校验 iterations ∈ [1, 1000]
+    1. 校验 iterations ∈ [1, 1000] + pipeline_override 结构
     2. 加载 + 合并 pipeline（用 OVERWRITE 策略，benchmark_node 视角下冲突无所谓）
     3. 解析 entry（默认用首个文件的第一个 key）
     4. 校验 node / entry 都在 merged 中
     5. 加载 Resource（若有 resource_path）+ Tasker
     6. 构造 override pipeline（强制 entry → target → done）
-    7. 跑 iterations 次，每次记录 wall-clock latency + target.score + 采样
+    7. 跑 iterations 次（每次 post_task 附带 pipeline_override 做字段级覆盖），
+       记录 wall-clock latency + target.score + 采样
     8. 聚合返回 BenchmarkRunResult
     """
     if not isinstance(iterations, int) or iterations < 1 or iterations > 1000:
         return (
             f"参数错误: iterations 必须是 1..1000 的整数，实际: {iterations!r}"
         )
+
+    try:
+        override_dict = _validate_pipeline_override(pipeline_override)
+    except ValueError as e:
+        return f"参数错误: {e}"
 
     # 1) 规范化 + 预校验 + 合并
     try:
@@ -1265,6 +1461,17 @@ def _benchmark_node_impl(
     if entry_node not in merged:
         return f"入口节点 {entry_node!r} 不存在（可用节点: {sorted(merged.keys())}）"
 
+    # pipeline_override 不允许改 entry / node 的 next：
+    # benchmark 靠强制 entry → node → done 链路隔离下游副作用，
+    # 覆盖 next 会破坏隔离（post_task 级覆盖优先于 Resource 级 override）
+    for protected in (entry_node, node):
+        if protected in override_dict and "next" in override_dict[protected]:
+            return (
+                f"参数错误: pipeline_override 不允许覆盖 {protected!r} 的 next 字段"
+                "（会破坏 benchmark 的 entry → node → done 隔离链路）"
+            )
+    override_warnings = _unknown_override_nodes(override_dict, merged)
+
     # 2) Resource + Tasker
     if resource_path:
         add_resource_path(resource_path)
@@ -1283,11 +1490,11 @@ def _benchmark_node_impl(
     if not resource.override_pipeline(override):
         return "override_pipeline 写入失败"
 
-    # 4) 跑 iterations
+    # 4) 跑 iterations（post_task 级 pipeline_override 按字段合并，不动 Resource）
     per_iter: List[tuple[Optional[float], List[dict], int]] = []
     for _ in range(iterations):
         start = time.perf_counter()
-        detail = tasker.post_task(entry_node).wait().get()
+        detail = tasker.post_task(entry_node, override_dict).wait().get()
         elapsed_ms = int(round((time.perf_counter() - start) * 1000))
         target_detail = None
         if detail and getattr(detail, "nodes", None):
@@ -1298,7 +1505,7 @@ def _benchmark_node_impl(
         score, sample = _summarize_iteration(target_detail, node)
         per_iter.append((score, sample, elapsed_ms))
 
-    return _aggregate_benchmark(node, per_iter).to_dict()
+    return _aggregate_benchmark(node, per_iter, warnings=override_warnings).to_dict()
 
 
 @mcp.tool(
@@ -1319,12 +1526,19 @@ def _benchmark_node_impl(
     - entry: 入口节点名（可选；默认用首个文件第一个 key）
     - iterations: 跑几次（1..1000，默认 10）
     - resource_path: 资源目录路径（可选，同 run_pipeline）
+    - pipeline_override: 单次 benchmark 的节点参数覆盖（可选），与 run_pipeline 同语义。
+      调参循环里用它免改文件试参数（试完确定值后再写回 pipeline JSON）：
+        benchmark_node(..., node="MyNode",
+                       pipeline_override={"MyNode": {"roi": [x, y, w, h], "threshold": 0.8}})
+      也可用 {"MyNode": {"timeout": 2000}} 压缩未命中时的单次迭代耗时（默认节点超时 20s）。
+      ⚠️ 不允许覆盖 entry / node 的 next 字段（会破坏 benchmark 的隔离链路，直接报参数错误）。
 
     实现机制：
     1. 加载完整 pipeline（用 OVERWRITE 策略，benchmark 视角下冲突无所谓）
     2. 构造 override pipeline：entry → node（强制）→ done（剥离原 next）
        避免 node 原 next 触发下游副作用
-    3. 跑 iterations 次，每次记录 wall-clock latency + node.recognition.all_results[0].score
+    3. 跑 iterations 次，每次 post_task 附带 pipeline_override（字段级合并），
+       记录 wall-clock latency + node.recognition.all_results[0].score
     4. 聚合返回 BenchmarkRunResult
 
     返回值 BenchmarkRunResult.to_dict()：
@@ -1358,7 +1572,14 @@ def benchmark_node(
     entry: Optional[str] = None,
     iterations: int = 10,
     resource_path: Optional[str] = None,
+    pipeline_override: Optional[dict] = None,
 ) -> dict | str:
     return _benchmark_node_impl(
-        controller_id, pipeline_path, node, entry, iterations, resource_path
+        controller_id,
+        pipeline_path,
+        node,
+        entry,
+        iterations,
+        resource_path,
+        pipeline_override,
     )

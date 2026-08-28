@@ -169,6 +169,8 @@ Before drawing any conclusion from a tool call, verify:
 - __Don't conflate "test contamination" with "tool bug"__ — if a tool worked once and then fails, check the test state before assuming the tool is broken. Window switching, manual user interaction between calls, and stale controllers are common contamination sources.
 - __`save_captured_image` writes into project bundle, not MaaMCP data dir__ — destination is `<bundle_root>/image/<subcategory>/<name>.png` (the path TemplateMatch's `template` field reads from). `bundle_root` is the directory passed to `Resource.post_bundle()`. For MAAGC it's `assets/resource/base/`; for MaaFramework sample it's `<repo>/sample/resource`. Default `overwrite=False` protects existing templates — pass `True` explicitly when updating.
 - __`benchmark_node` measures wall-clock, not per-node timing__ — returned `latency_ms` is full `post_task → TaskDetail` time, including entry recognition overhead (~50-200ms). For per-node estimate subtract that baseline. `mean_score=None` with `successes=0` means the node never hit — threshold/ROI/template mismatch.
+- __`run_pipeline` / `benchmark_node` accept per-run `pipeline_override`__ — field-level node overrides passed to `post_task` (same mechanism as interface.json's `pipeline_override`): tighten `roi`, tweak `expected`/`threshold`/`timeout` for single-node verification without editing pipeline files. Applies to one run only — the Resource is untouched. Node names not present in the loaded files show up in `warnings` (typo'd names silently no-op, so check them). `benchmark_node` rejects overriding `next` on entry/target (would break its isolation chain).
+- __`run_pipeline` supports tool-side `timeout_seconds`__ — polls the task and calls `post_stop()` on expiry, returning `status="timeout"` + partial node details instead of blocking the MCP call indefinitely (a node that never matches burns its own `timeout`, 20s by default). Note: MaaFramework marks a stopped task's own status as succeeded — the tool reports `"timeout"` explicitly instead of trusting it. Recommended 5-15s for single-node verification; `None` (default) keeps the old unbounded behavior.
 
 ### Pipeline node tuning loop
 
@@ -180,7 +182,7 @@ When a TemplateMatch / OCR / ColorMatch node isn't reliable, iterate this loop (
 4. `save_captured_image(cropped_path, bundle_root, subcategory, name)` → promote it to a TemplateMatch template
 5. In pipeline JSON: `"recognition": "TemplateMatch", "template": "<subcategory>/<name>.png"`
 6. `benchmark_node(cid, pipeline_path, node=<name>, iterations=10..50)` → inspect `mean_score`, `latency_ms`, `all_results_samples`
-7. If `mean_score` < 0.85 or `successes < iterations`: tighten ROI (smaller `region`), raise `threshold`, or refresh the template with a fresh capture
+7. If `mean_score` < 0.85 or `successes < iterations`: tighten ROI (smaller `region`), raise `threshold`, or refresh the template with a fresh capture — try candidate values via `pipeline_override={"<name>": {"roi": [...], "threshold": ...}}` first (no file edits), then write the winning values back into the pipeline JSON
 8. Repeat 2-7 until stable
 
 For MaaMCP-side pipeline infra testing, see `tests/test_dbg_pipeline.py` (gated by `@pytest.mark.integration`; skips if `MaaDbgControlUnit` DLL isn't shipped).
