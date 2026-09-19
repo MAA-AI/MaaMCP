@@ -162,7 +162,9 @@ Before drawing any conclusion from a tool call, verify:
 
 ### MaaMCP tool behavior notes (project-specific)
 
-- __`ocr` / `screencap` accept `region=(x,y,w,h)`__ — small-region OCR is 4–8× faster, coords auto-compensated to original screen via maafw `JOCR(roi=..., roi_offset=...)` (no manual Python crop+offset needed). See commit `ea4b4bd` for the perf data.
+- __`ocr` / `screencap` accept `region=(x,y,w,h)`__: regions use full controller screenshot coordinates. OCR uses `JOCR(roi=...)`; the framework restores the origin automatically. Do not repeat roi in roi_offset.
+- __Shared coordinate basis__: Win32/ADB default to a 720-pixel short side. Connection parameter `target_short_side` accepts another positive integer or `None` (native size). `screencap` defaults to `resolution=None`, preserving controller image dimensions. OCR, actions, and Pipelines use that controller's coordinates. Non-720 modes do not automatically adapt existing 720p templates or ROIs.
+- __Locating targets after cropping/resizing__: `screencap(..., include_metadata=True)` returns `path`, `coordinate_size`, `image_size`, and `image_to_controller`. Map image point `(u,v)` to `(u*sx+ox,v*sy+oy)` and round before acting. The default return remains a path string; metadata's `path` can be passed to `save_captured_image`.
 - __Win32 `click` on Chromium/Electron windows can silent-fail__ — PostMessage mouse events are dropped, API returns True but no visual change. Keyboard events (`post_input_text`, `post_key_*`) still work because Chrome's keyboard handler is more lenient. Tool description has the full caveat.
 - __`input_text` requires target focus__ — it sends keyboard events to the focused element. If `click` failed to focus, `input_text` lands elsewhere. Sequence: `click(target)` → `input_text(text)` in __immediate succession__, no `screencap/ocr` between.
 - __Controller has a lifecycle__ — system cross-day, Chrome restart, or sleep/wake invalidates `controller_id`. Symptom: all operations return `None`/`False` silently. Fix: re-call `find_window_list()` + `connect_window()`.

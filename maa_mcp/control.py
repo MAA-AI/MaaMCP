@@ -23,7 +23,9 @@ from maa_mcp.core import mcp, object_registry, controller_info_registry, Control
     - 失败：返回 False
 
     说明：
-    坐标系统以屏幕左上角为原点 (0, 0)，X 轴向右，Y 轴向下。
+    坐标使用控制器完整截图空间，以左上角为原点 (0, 0)，X 轴向右，Y 轴向下。
+    默认全屏 screencap 和 OCR 返回框可直接用于点击。显式缩放或裁剪的截图
+    坐标需先换算回完整截图空间；设备物理分辨率可能与该空间不同。
 
     重要提示：
     - 返回 True 不代表"视觉上生效"。Win32 控制器对 Chromium/Electron
@@ -67,7 +69,7 @@ def click(
     - 失败：返回 False
 
     说明：
-    坐标系统以屏幕左上角为原点 (0, 0)，X 轴向右，Y 轴向下。
+    坐标使用控制器完整截图空间，与默认全屏 screencap、OCR 和 click 一致。
 """,
 )
 def double_click(
@@ -118,7 +120,7 @@ def double_click(
     - 失败：返回 False
 
     说明：
-    - 坐标系统以屏幕左上角为原点 (0, 0)
+    - 坐标使用控制器完整截图空间，与默认全屏 screencap、OCR 和 click 一致
     - duration 参数控制滑动速度，数值越大滑动越慢
     - 起点、终点坐标由 AI 根据当前 OCR 识别结果和场景自行计算决定
 

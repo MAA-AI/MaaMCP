@@ -64,6 +64,9 @@ def find_window_list() -> list[str]:
     - screencap_method: 截图方式，默认 "FramePool"（一般无需修改）
     - mouse_method: 鼠标输入方式，默认 "PostMessage"（一般无需修改）
     - keyboard_method: 键盘输入方式，默认 "PostMessage"（一般无需修改）
+    - target_short_side: 控制器截图短边，默认 720；可设为 1080 等正整数。
+      传 None 使用原始尺寸。OCR、动作和 Pipeline 均使用该控制器的截图坐标，
+      非 720 模式需要匹配的模板及 ROI；screencap 的 resolution 不会改变此基准。
 
     返回值：
     - 成功：返回窗口控制器 ID（字符串），用于后续所有窗口操作
@@ -107,7 +110,12 @@ def connect_window(
     screencap_method: str = "FramePool",
     mouse_method: str = "PostMessage",
     keyboard_method: str = "PostMessage",
+    target_short_side: Optional[int] = 720,
 ) -> Optional[str]:
+    if target_short_side is not None and (
+        type(target_short_side) is not int or target_short_side <= 0
+    ):
+        raise ValueError("target_short_side must be a positive integer or None")
     window: DesktopWindow | None = object_registry.get(window_name)
     if not window:
         return None
@@ -128,9 +136,12 @@ def connect_window(
         mouse_method=mouse_enum,
         keyboard_method=keyboard_enum,
     )
-    # 设置默认截图短边为 1080p
-    # 电脑屏幕通常较大，使用更高清的截图
-    window_controller.set_screenshot_target_short_side(1080)
+    if target_short_side is None:
+        configured = window_controller.set_screenshot_use_raw_size(True)
+    else:
+        configured = window_controller.set_screenshot_target_short_side(target_short_side)
+    if not configured:
+        return None
 
     if not window_controller.post_connection().wait().succeeded:
         return None
@@ -141,6 +152,7 @@ def connect_window(
         "screencap_method": screencap_method,
         "mouse_method": mouse_method,
         "keyboard_method": keyboard_method,
+        "target_short_side": target_short_side,
     }
 
     controller_info_registry[controller_id] = ControllerInfo(

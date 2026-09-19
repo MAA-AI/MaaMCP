@@ -161,7 +161,9 @@ OCR 模型和截图存储在平台特定的目录中：
 
 ### MaaMCP 工具行为注记（项目特定）
 
-- __`ocr` / `screencap` 支持 `region=(x,y,w,h)`__——小区域 OCR 提速 4–8×，坐标由 maafw `JOCR(roi=..., roi_offset=...)` 自动补偿（不用 Python 侧手写 crop+offset）。性能数据见 commit `ea4b4bd`。
+- __`ocr` / `screencap` 支持 `region=(x,y,w,h)`__：region 使用控制器完整截图坐标。OCR 使用 `JOCR(roi=...)`，框架自动补回原点；不要将 roi 重复赋给 roi_offset。
+- __统一坐标基准__：Win32/ADB 默认短边 720，连接参数 `target_short_side` 可选其他正整数或 `None`（原尺寸）。`screencap` 默认 `resolution=None`，保留控制器截图尺寸；OCR、动作和 Pipeline 坐标均服从该控制器。非 720 模式不会自动适配既有 720p 模板及 ROI。
+- __裁图/缩放后的定位__：`screencap(..., include_metadata=True)` 返回 `path`、`coordinate_size`、`image_size` 和 `image_to_controller`。图中 `(u,v)` 换算为 `(u*sx+ox,v*sy+oy)` 后取整再操作。默认仍返回路径字符串；元数据中的 `path` 可直接传给 `save_captured_image`。
 - __Win32 `click` 对 Chromium/Electron 窗口可能静默失效__——PostMessage 鼠标消息被 Chromium 丢，API 返回 True 但界面无变化。键盘消息（`post_input_text` / `post_key_*`）仍能正常投递（Chrome 内部对键盘消息更宽松）。完整说明在工具描述里。
 - __`input_text` 需要目标已聚焦__——它把字符投到当前焦点元素。`click` 失败没建立焦点的话，`input_text` 会投到错误位置。正确顺序：`click(target)` → `input_text(text)` __紧接__，中间不夹 screencap/ocr。
 - __Controller 有生命周期__——系统跨天 / Chrome 重启 / 休眠唤醒后，`controller_id` 失效。症状：所有操作静默返回 None/False。处理：重新 `find_window_list()` + `connect_window()`。

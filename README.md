@@ -51,6 +51,32 @@ Talk is cheap, 请看: **[🎞️ Bilibili 视频演示](https://www.bilibili.co
 - `ocr` - 光学字符识别（高效，推荐优先使用）
 - `screencap` - 屏幕截图（按需使用，token 开销大）
 
+#### 截图与坐标约定
+
+Win32 和 ADB 连接默认使用 `target_short_side=720`，保持画面比例。OCR 的 `region`、
+返回框、点击、滑动和 Pipeline 均使用该控制器的完整截图坐标，不一定是设备物理坐标。
+`screencap` 默认 `resolution=None`，不再额外缩放，整图坐标可直接用于操作。
+
+连接时可传 `target_short_side=1080` 等正整数，或传 `None` 使用原尺寸。该选项会改变
+整个控制器的坐标基准，模板和 Pipeline ROI 必须使用匹配的尺度；现有 720p 资源应保留
+默认连接设置。依赖旧版 Win32 1080p 坐标的调用方可显式选择 `1080`。
+
+`screencap` 默认仍返回路径字符串。裁图或显式设置 `resolution` 后需要定位操作时，
+传入 `include_metadata=True`，返回以下信息：
+
+| 字段 | 含义 |
+| --- | --- |
+| `path` | 图像绝对路径，也可传给 `save_captured_image` |
+| `controller_id` / `coordinate_system` | 所属控制器及坐标空间（`controller`） |
+| `coordinate_size` | 控制器完整截图 `[宽, 高]` |
+| `image_size` | 保存图像 `[宽, 高]` |
+| `image_to_controller.scale` | 图像到控制器的 `[sx, sy]` 比例 |
+| `image_to_controller.offset` | 实际裁剪原点在控制器空间中的 `[ox, oy]` |
+
+图中点 `(u, v)` 应换算为 `(round(u*sx+ox), round(v*sy+oy))` 再用于点击。
+变换包含实际缩放尺寸、取整和裁剪边界修正，只对应本次截图；窗口大小或布局变化后应重新截图。
+显式 `resolution` 只影响保存图像，不改变控制器坐标，也不能恢复之前下采样丢失的细节。
+
 ### 🎮 设备控制
 
 - `click` - 点击指定坐标（支持多触点/鼠标按键选择、长按）

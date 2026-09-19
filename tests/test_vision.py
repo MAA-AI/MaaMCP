@@ -170,23 +170,23 @@ class TestApplyScreencapPipeline:
     """用真实 numpy 数组测 screencap 的图像处理流水线。
 
     真实场景：AI 拿到 screencap 截图后想做局部 OCR，需要传 region。
-    region 坐标空间 = 设备原始分辨率；流水线负责缩放到输出图坐标系。
+    region 位于控制器完整截图坐标系；显式缩放时流水线负责转换到输出图坐标系。
     """
 
-    def test_default_720p_no_region(self):
-        """raw 1920×1080 + 无 region + 默认 720：全图归一到 1280×720"""
+    def test_explicit_720p_no_region(self):
+        """raw 1920×1080 + 无 region + 显式 720：全图归一到 1280×720"""
         raw = np.zeros((1080, 1920, 3), dtype=np.uint8)
         out = _apply_screencap_pipeline(raw, region=None, resolution=720)
         assert out.shape == (720, 1280, 3)
 
-    def test_default_720p_portrait(self):
-        """raw 1080×1920 + 无 region + 默认 720：全图归一到 720×1280"""
+    def test_explicit_720p_portrait(self):
+        """raw 1080×1920 + 无 region + 显式 720：全图归一到 720×1280"""
         raw = np.zeros((1920, 1080, 3), dtype=np.uint8)
         out = _apply_screencap_pipeline(raw, region=None, resolution=720)
         assert out.shape == (1280, 720, 3)
 
     def test_region_in_raw_coords_1080p(self):
-        """raw 1920×1080 + region (in 1080p 空间) + 默认 720：
+        """raw 1920×1080 + region (in 1080p 空间) + 显式 720：
         region 按 2/3 缩放后裁到 1280×720 上 → 输出 (400, 533, 3)
         """
         raw = np.zeros((1080, 1920, 3), dtype=np.uint8)
@@ -198,7 +198,7 @@ class TestApplyScreencapPipeline:
         assert out.shape == (400, 533, 3)
 
     def test_region_in_raw_coords_portrait(self):
-        """raw 1080×1920 + region (in 竖屏 1080p 空间) + 默认 720：
+        """raw 1080×1920 + region (in 竖屏 1080p 空间) + 显式 720：
         region 按 2/3 缩放后裁到 720×1280 上 → 输出 (400, 533, 3)
         """
         raw = np.zeros((1920, 1080, 3), dtype=np.uint8)
@@ -208,7 +208,7 @@ class TestApplyScreencapPipeline:
         assert out.shape == (400, 533, 3)
 
     def test_region_no_scale_when_already_720p(self):
-        """raw 1280×720 + region + 默认 720：缩放=1，no-op"""
+        """raw 1280×720 + region + 显式 720：缩放=1，no-op"""
         raw = np.zeros((720, 1280, 3), dtype=np.uint8)
         out = _apply_screencap_pipeline(
             raw, region=(100, 100, 800, 600), resolution=720
@@ -267,9 +267,9 @@ class TestScreencapSaveRoundtrip:
     @pytest.mark.parametrize(
         "raw_shape,region,resolution,expected_shape",
         [
-            # 默认 720p 全图
+            # 显式 720p 全图
             ((1080, 1920, 3), None, 720, (720, 1280, 3)),
-            # 默认 720p 竖屏
+            # 显式 720p 竖屏
             ((1920, 1080, 3), None, 720, (1280, 720, 3)),
             # region + 720p 横屏
             ((1080, 1920, 3), (100, 100, 800, 600), 720, (400, 533, 3)),
