@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 from pathlib import Path
 
+from maa_mcp import vision
 from maa_mcp.vision import (
     _apply_screencap_pipeline,
     _crop_region,
@@ -78,13 +79,30 @@ class TestResizeShortEdge:
         out = _resize_short_edge(img, 1080)
         assert out is img
 
-    def test_invalid_resolution_raises(self):
-        """resolution <= 0 抛 ValueError"""
+    @pytest.mark.parametrize(
+        "resolution",
+        [0, -1, 1.5, 720.0, True, False, "720", None, float("nan"), float("inf")],
+    )
+    def test_invalid_resolution_raises(self, resolution):
+        """非法尺寸必须在调用 OpenCV 前抛出明确的 ValueError。"""
         img = np.zeros((720, 1280, 3), dtype=np.uint8)
-        with pytest.raises(ValueError, match="必须 > 0"):
-            _resize_short_edge(img, 0)
-        with pytest.raises(ValueError, match="必须 > 0"):
-            _resize_short_edge(img, -1)
+        with pytest.raises(ValueError, match="target_short_edge.*int"):
+            _resize_short_edge(img, resolution)
+
+
+@pytest.mark.parametrize(
+    "resolution",
+    [0, -1, 1.5, 720.0, True, False, "720", float("nan"), float("inf")],
+)
+def test_screencap_rejects_invalid_resolution_before_controller_access(monkeypatch, resolution):
+    monkeypatch.setattr(
+        vision.object_registry,
+        "get",
+        lambda _: pytest.fail("Invalid resolution must be rejected before controller access"),
+    )
+    capture = getattr(vision.screencap, "fn", vision.screencap)
+    with pytest.raises(ValueError, match="resolution must be a positive integer or None"):
+        capture("unused", resolution=resolution)
 
 
 # ---------------------------------------------------------------------------

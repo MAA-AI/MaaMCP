@@ -51,14 +51,14 @@ def _resize_short_edge(image, target_short_edge: int):
 
     Args:
         image: cv2 图像 (numpy.ndarray)。
-        target_short_edge: 目标短边像素数，必须 > 0。
+        target_short_edge: 目标短边像素数，必须是 > 0 的 int（不接受 bool）。
 
     Returns:
         缩放后的图像；若短边已等于 target，则原图返回（no-op）。
     """
-    if target_short_edge <= 0:
+    if type(target_short_edge) is not int or target_short_edge <= 0:
         raise ValueError(
-            f"target_short_edge 必须 > 0，实际: {target_short_edge}"
+            f"target_short_edge 必须 > 0 且类型为 int，实际: {target_short_edge!r}"
         )
     h, w = image.shape[:2]
     short = min(h, w)
@@ -156,6 +156,8 @@ def _screencap(
         Pipeline 相同。默认不额外缩放；显式指定 resolution 后，落盘图坐标
         需要换算回控制器坐标。裁图坐标还需加回裁剪原点。
     """
+    if resolution is not None and (type(resolution) is not int or resolution <= 0):
+        raise ValueError("resolution must be a positive integer or None")
     controller: Controller | None = object_registry.get(controller_id)
     if not controller:
         return None
@@ -280,6 +282,7 @@ def ocr(
               适用于"我只想看搜框附近 / 某个按钮周围"的场景，省传输与读图时间。
               不传则截全屏（默认行为）。
     - resolution: 可选整数，短边归一化目标（像素），默认 None，不额外缩放。
+              必须是正整数或 None；非法参数会抛出明确的参数错误。
               720p 不锁死 16:9：按短边等比缩放，原图长宽比保留。
               例如：1920×1080 → 1280×720；1080×1920 → 720×1280；
                     1280×800 (16:10) → 1152×720。
