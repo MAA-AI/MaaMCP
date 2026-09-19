@@ -97,6 +97,12 @@ mcp = FastMCP(
        - 使用 connect_adb_device(device_name) 或 connect_window(window_name) 建立连接
        - 可连接多个设备/窗口，每个连接返回独立的控制器 ID
 
+       坐标约定：连接默认 target_short_side=720，可指定其他正整数或 None（原尺寸）。
+       OCR、动作和 Pipeline 都使用控制器完整截图坐标，不一定等于设备物理坐标。
+       screencap 默认不额外缩放；裁图或显式缩放后定位，请设 include_metadata=True，
+       按 image_to_controller 的 scale 和 offset 换算后再操作。
+       非 720 连接模式需要对应尺度的 Pipeline 模板和 ROI。
+
     2. 串行自动化执行循环（流程 1 之后选择此流程进入串行模式）
        ⭐ 标准工作循环：截图(screencap) → OCR识别(ocr) → 分析内容 → 执行操作(click/swipe等) → 重复直到完成
        - 调用 ocr(controller_id) 对指定设备进行屏幕截图和 OCR 识别

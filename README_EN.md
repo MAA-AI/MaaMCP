@@ -51,6 +51,36 @@ Talk is cheap, see: **[🎞️ Bilibili Video Demo](https://www.bilibili.com/vid
 - `ocr` - Optical Character Recognition (efficient, recommended for priority use, OCR model auto-downloads on first use)
 - `screencap` - Screenshot capture (use as needed, high token cost)
 
+#### Screenshot Coordinates
+
+Win32 and ADB connections default to `target_short_side=720`, preserving aspect ratio.
+OCR regions and boxes, clicks, swipes, and Pipelines all use the controller's full screenshot
+coordinates, which may differ from physical device coordinates. `screencap` now defaults to
+`resolution=None`, preserving that image size so full-image coordinates can be used directly.
+
+Pass a positive `target_short_side`, such as `1080`, when connecting, or `None` for native size.
+This changes the coordinate basis of the entire controller: templates and Pipeline ROIs must
+use the corresponding scale. Keep the default for existing 720p resources. Callers that rely
+on the previous Win32 1080p coordinates can explicitly select `1080`.
+
+`screencap` still returns a path string by default. When locating targets in cropped or explicitly
+resized images, pass `include_metadata=True` to receive:
+
+| Field | Meaning |
+| --- | --- |
+| `path` | Absolute image path, also accepted by `save_captured_image` |
+| `controller_id` / `coordinate_system` | Owning controller and coordinate space (`controller`) |
+| `coordinate_size` | Full controller screenshot `[width, height]` |
+| `image_size` | Saved image `[width, height]` |
+| `image_to_controller.scale` | Image-to-controller scale `[sx, sy]` |
+| `image_to_controller.offset` | Actual crop origin in controller coordinates `[ox, oy]` |
+
+Map an image point `(u, v)` to `(round(u*sx+ox), round(v*sy+oy))` before clicking.
+The transform includes actual resized dimensions, rounding, and crop boundary clamping. It only
+describes this capture; take another screenshot after the window size or layout changes.
+Explicit `resolution` only affects the saved image, not controller coordinates, and cannot
+restore detail lost in an earlier downsampling step.
+
 ### 🎮 Device Control
 
 - `click` - Click at coordinates (supports multi-touch/mouse button selection, long press)
