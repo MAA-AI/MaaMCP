@@ -23,7 +23,7 @@ from typing import Callable, Any, Optional, List, Dict
 
 from maa_mcp.vision import ocr, screencap
 from maa_mcp.control import click, swipe, input_text, click_key, scroll, double_click
-from maa_mcp.core import controller_info_registry, ControllerType
+from maa_mcp.core import controller_info_registry, object_registry, ControllerType
 from maa_mcp.adb import find_adb_device_list, connect_adb_device
 from maa_mcp.win32 import find_window_list, connect_window
 
@@ -269,8 +269,28 @@ class TestStressPerformance:
                     pytest.skip(
                         f"指定的窗口 {window_name!r} 不存在，可用窗口: {window_list}"
                     )
+                # connect_window 按标题查名字注册的表，同名窗口会互相覆盖，
+                # 可能连到另一个同名窗口上去——标题不唯一时宁可跳过。
+                if window_list.count(window_name) > 1:
+                    pytest.skip(
+                        f"窗口标题 {window_name!r} 不唯一（同名窗口 "
+                        f"{window_list.count(window_name)} 个），"
+                        f"为避免误操作其他窗口而跳过"
+                    )
+                # 记下校验过的那个窗口的 hwnd：connect_window 是按标题回查注册表
+                # 的，检查与连接之间若被别的 find_window_list() 刷新过，可能连到
+                # 另一个同名窗口。连接后核对 hwnd 对不上就放弃。
+                expected_hwnd = getattr(object_registry.get(window_name), "hwnd", None)
                 self.window_name = window_name
                 self.controller_id = _call_tool(connect_window, self.window_name)
+                if self.controller_id and expected_hwnd is not None:
+                    info = controller_info_registry.get(self.controller_id)
+                    actual_hwnd = info.connection_params.get("hwnd") if info else None
+                    if actual_hwnd != expected_hwnd:
+                        pytest.skip(
+                            f"连接到的窗口 hwnd {actual_hwnd!r} 与校验过的 "
+                            f"{expected_hwnd!r} 不一致，为避免误操作其他窗口而跳过"
+                        )
                 print(
                     f"  使用Windows窗口: {self.window_name}, 控制器ID: {self.controller_id}"
                 )
