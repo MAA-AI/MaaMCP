@@ -8,7 +8,7 @@ MaaFramework 能读的文件保持一致——否则同一份 pipeline，MaaFram
 
 与 MaaFramework（= meojson `json::parsec`）一致的接受集合：
 
-- 允许 `//` 行注释、`/* */` 块注释
+- 允许 `//` 行注释、`/* */` 块注释（行注释只以 `\n` 结束，与 meojson 一致）
 - 允许对象 / 数组尾逗号（但 `{,}`、`[,]` 这类空容器里的逗号是语法错误，
   MaaFramework 同样拒绝）
 - 其余严格遵循 JSON 规范：键必须是双引号字符串，拒绝单引号、拒绝
@@ -31,12 +31,18 @@ MaaFramework 能读的文件保持一致——否则同一份 pipeline，MaaFram
    方向是「更严」：MaaMCP 不会接受 MaaFramework 拒绝的文件，只会在这类病态的
    尾部残余上报错（`Extra data` / `Unterminated comment`）。
    注：未闭合注释出现在文档**内部**时，两边都拒绝，行为一致。
+
+另一处与 Python 解释器相关、而非与 meojson 相关的差异：Python 3.10.7+ 限制整数字
+符串的转换位数（默认 4300 位），3.10.12+ / 3.11.4+ / 3.12+ 的 json C scanner 会强制
+执行并抛 `ValueError`。本模块把它转成 `JsoncDecodeError`，避免它逃出调用方的
+`except json.JSONDecodeError` 分支直接冲到 MCP 工具调用之外。
 """
 
 from __future__ import annotations
 
 import json
 import math
+import re
 from typing import Any, Callable
 
 __all__ = ["JsoncDecodeError", "loads"]
@@ -45,6 +51,8 @@ _BOM = "﻿"
 _WHITESPACE = " \t\r\n"
 # 标准库 json 默认接受、但 JSON 规范与 MaaFramework 都不接受的字面量
 _NON_JSON_CONSTANTS = frozenset({"NaN", "Infinity", "-Infinity"})
+# 注释内容置空时保留换行（换行影响行号，不能被抹掉）
+_BLANK_NON_NEWLINE = re.compile(r"[^\n]")
 
 
 class JsoncDecodeError(json.JSONDecodeError):
@@ -72,8 +80,17 @@ def _strip_comments(text: str) -> str:
 
     注释内容替换为空格（块注释内的换行保留），返回文本与入参等长，
     行列号完全一致，后续步骤的报错位置可以直接沿用。
+
+    实现上按「片段」拼接而不是逐字符列表：注释通常只占文件很小一部分，
+    这样峰值内存是文件大小的常数倍，而不是每字符一个指针（8 字节/字符）。
+
+    行注释只以 `\\n` 结束——**裸 `\\r` 不结束行注释**，与 meojson 一致
+    （meojson 的行注释扫描同样只认 `\\n`，因此仅用 CR 换行的文件在
+    MaaFramework 里也会被整段吞掉）。保持一致才能保证「同一个文件在
+    MaaFramework 与 MaaMCP 里的解析结果相同」。
     """
-    out = list(text)
+    parts: list[str] = []
+    last = 0  # 尚未输出的原文本片段起点
     i = 0
     n = len(text)
     in_string = False
@@ -101,8 +118,9 @@ def _strip_comments(text: str) -> str:
                 # 行注释：到行尾为止（换行符本身保留）
                 end = text.find("\n", i)
                 end = n if end == -1 else end
-                for k in range(i, end):
-                    out[k] = " "
+                parts.append(text[last:i])
+                parts.append(" " * (end - i))
+                last = end
                 i = end
                 continue
             if marker == "*":
@@ -110,15 +128,16 @@ def _strip_comments(text: str) -> str:
                 end = text.find("*/", i + 2)
                 if end == -1:
                     raise JsoncDecodeError("Unterminated comment", text, i)
-                for k in range(i, end + 2):
-                    if text[k] != "\n":
-                        out[k] = " "
+                parts.append(text[last:i])
+                parts.append(_BLANK_NON_NEWLINE.sub(" ", text[i : end + 2]))
+                last = end + 2
                 i = end + 2
                 continue
 
         i += 1
 
-    return "".join(out)
+    parts.append(text[last:])
+    return "".join(parts)
 
 
 def _strip_trailing_commas(text: str) -> str:
@@ -129,7 +148,8 @@ def _strip_trailing_commas(text: str) -> str:
     的逗号是语法错误，MaaFramework 会拒绝。这里必须同样拒绝，否则 MaaMCP
     会接受 MaaFramework 拒绝的文件。
     """
-    out = list(text)
+    parts: list[str] = []
+    last = 0
     i = 0
     n = len(text)
     in_string = False
@@ -163,7 +183,9 @@ def _strip_trailing_commas(text: str) -> str:
             while j < n and text[j] in _WHITESPACE:
                 j += 1
             if j < n and text[j] in "}]" and prev not in "{[,":
-                out[i] = " "
+                parts.append(text[last:i])
+                parts.append(" ")
+                last = i + 1
             prev = ","
             i += 1
             continue
@@ -171,7 +193,8 @@ def _strip_trailing_commas(text: str) -> str:
         prev = ch
         i += 1
 
-    return "".join(out)
+    parts.append(text[last:])
+    return "".join(parts)
 
 
 def _reject_non_json_constants(text: str) -> None:
@@ -289,16 +312,24 @@ def _decode_surrogates(text: str, doc: str) -> str:
 
 
 def _sanitize_surrogates(value: Any, doc: str) -> Any:
-    """递归处理解析结果里的字符串（键与值），还原代理对、拒绝落单代理。"""
+    """递归处理解析结果里的字符串（键与值），还原代理对、拒绝落单代理。
+
+    键在规范化后可能撞车（同一字符既以字面形式又以代理对转义形式出现），
+    此时必须报错而不是让后来的值静默覆盖前面的值——meojson 在解析阶段
+    就把 `\\uXXXX` 合成真实码点，因此同样会判定为重复键。
+    """
     if isinstance(value, str):
         return _decode_surrogates(value, doc)
     if isinstance(value, list):
         return [_sanitize_surrogates(item, doc) for item in value]
     if isinstance(value, dict):
-        return {
-            _decode_surrogates(key, doc): _sanitize_surrogates(item, doc)
-            for key, item in value.items()
-        }
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            new_key = _decode_surrogates(key, doc)
+            if new_key in result:
+                raise JsoncDecodeError(f"Duplicate key {new_key!r}", doc)
+            result[new_key] = _sanitize_surrogates(item, doc)
+        return result
     return value
 
 
@@ -338,5 +369,11 @@ def loads(text: str) -> Any:
             raise
         # 用原文重新抛出：偏移量一致，位置信息对用户仍然准确
         raise JsoncDecodeError(e.msg, doc, e.pos) from e
+    except ValueError as e:
+        # json.JSONDecodeError 是 ValueError 的子类，上面已先捕获。
+        # 这里剩下的是解释器的整数位数限制（Python 3.10.7+ 默认 4300 位，
+        # 3.10.12+ / 3.11.4+ / 3.12+ 的 json C scanner 会强制执行）抛出的
+        # ValueError——它不是 JSONDecodeError，会逃出调用方的 except 分支。
+        raise JsoncDecodeError(f"invalid number: {e}", doc) from e
 
     return _sanitize_surrogates(parsed, doc)

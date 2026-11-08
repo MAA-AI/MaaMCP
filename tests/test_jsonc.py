@@ -10,12 +10,13 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
 from maa_mcp.agent_supervisor import load_agent_config
-from maa_mcp.jsonc import loads
+from maa_mcp.jsonc import _sanitize_surrogates, _strip_comments, loads
 from maa_mcp.pipeline_tools import (
     _read_and_validate_pipelines,
     load_pipeline,
@@ -209,6 +210,56 @@ class TestJsoncLoads:
         """
         with pytest.raises(json.JSONDecodeError):
             loads('{"A": 1}/x')
+
+    def test_cr_only_line_comment_matches_meojson(self) -> None:
+        """仅用 CR 换行时，行注释会吞掉后续内容——与 meojson 一致。
+
+        meojson 的行注释扫描只认 `\\n`，因此仅用 CR 换行的文件在 MaaFramework
+        里同样会被整段吞掉。这里必须保持一致，否则同一份文件在两边解析结果
+        不同（MaaFramework 能读、MaaMCP 读不了，或反之）。
+        """
+        with pytest.raises(json.JSONDecodeError):
+            loads('// 注释\r{"A": 1}')
+        # 注释在末尾时不影响已解析出的内容
+        assert loads('{"A": 1}// 注释\r') == {"A": 1}
+
+    def test_normalized_key_collision_rejected(self) -> None:
+        """规范化后撞车的键必须报错，而不是让后来的值静默覆盖。"""
+        payload = {chr(0x1F600): 1, chr(0xD83D) + chr(0xDE00): 2}
+
+        with pytest.raises(json.JSONDecodeError, match="Duplicate key"):
+            _sanitize_surrogates(payload, "{}")
+
+    def test_comment_stripping_preserves_length(self) -> None:
+        """注释替换成等长空白，长度不变（错误位置才对得上原文）。"""
+        text = '{\n// 注释\n"A": 1 /* 块注释 */\n}'
+
+        assert len(_strip_comments(text)) == len(text)
+
+    def test_huge_integer_reported_as_decode_error(self) -> None:
+        """超大整数应转成 JSONDecodeError，而不是逃出裸 ValueError。
+
+        Python 3.10.7+ 有整数位数限制（默认 4300 位）；3.10.12+ / 3.11.4+ /
+        3.12+ 的 json C scanner 会强制执行并抛 ValueError——它不是
+        JSONDecodeError，会逃出调用方的 `except` 分支直接冲到工具调用之外。
+        """
+        setter = getattr(sys, "set_int_max_str_digits", None)
+        if setter is None:
+            pytest.skip("当前解释器没有整数位数限制")
+
+        old = sys.get_int_max_str_digits()
+        setter(20)
+        try:
+            try:
+                loads('{"A": ' + "9" * 50 + "}")
+            except json.JSONDecodeError:
+                pass  # 期望路径：已转成 JSONDecodeError 子类
+            except ValueError as e:
+                pytest.fail(f"ValueError 逃出了 JSONDecodeError: {e}")
+            else:
+                pytest.skip("当前解释器的 json scanner 未强制整数位数限制")
+        finally:
+            setter(old)
 
     @pytest.mark.parametrize(
         "payload",

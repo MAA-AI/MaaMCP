@@ -269,6 +269,14 @@ class TestStressPerformance:
                     pytest.skip(
                         f"指定的窗口 {window_name!r} 不存在，可用窗口: {window_list}"
                     )
+                # connect_window 按标题查名字注册的表，同名窗口会互相覆盖，
+                # 可能连到另一个同名窗口上去——标题不唯一时宁可跳过。
+                if window_list.count(window_name) > 1:
+                    pytest.skip(
+                        f"窗口标题 {window_name!r} 不唯一（同名窗口 "
+                        f"{window_list.count(window_name)} 个），"
+                        f"为避免误操作其他窗口而跳过"
+                    )
                 self.window_name = window_name
                 self.controller_id = _call_tool(connect_window, self.window_name)
                 print(
