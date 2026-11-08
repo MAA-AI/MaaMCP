@@ -513,8 +513,9 @@ def _read_and_validate_pipelines(
     校验项：
     1. 文件存在
     2. 路径是文件（不是目录）
-    3. JSONC 解析成功（允许注释与尾逗号，与 MaaFramework 一致）
-    4. 顶层是非空 dict
+    3. 文件是合法的 UTF-8 文本
+    4. JSONC 解析成功（允许注释与尾逗号，与 MaaFramework 一致）
+    5. 顶层是非空 dict
 
     Args:
         files: 文件路径列表（绝对或相对路径均可）
@@ -1530,7 +1531,8 @@ def _benchmark_node_impl(
 
     参数：
     - controller_id: 控制器 ID，由 connect_adb_device() / connect_window() 返回
-    - pipeline_path: Pipeline JSON 路径（str 或 list[str]）
+    - pipeline_path: Pipeline JSON 路径（str 或 list[str]），支持 JSONC 语法
+                    （`//` 与 `/* */` 注释、对象/数组尾逗号）
     - node: 被测节点名（必须在 pipeline 中）
     - entry: 入口节点名（可选；默认用首个文件第一个 key）
     - iterations: 跑几次（1..1000，默认 10）

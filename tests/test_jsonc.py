@@ -117,6 +117,34 @@ class TestJsoncLoads:
         """UTF-8 BOM 应被剥离而不是报错。"""
         assert loads('﻿{"A": 1}') == {"A": 1}
 
+    def test_overflowing_float_rejected(self) -> None:
+        """溢出成 inf 的数字必须拒绝。
+
+        `1e999` 语法合法，但解析结果是 inf，序列化回去会变成非法的
+        `Infinity` 字面量——写出来的文件既不是合法 JSON，MaaFramework 的
+        严格解析也会失败。
+        """
+        with pytest.raises(json.JSONDecodeError, match="not a finite number"):
+            loads('{"A": {"threshold": 1e999}}')
+
+    def test_surrogate_pair_decoded(self) -> None:
+        """`\\uXXXX` 代理对应还原成真实码点（与 meojson 一致）。"""
+        assert loads('{"A": "\\ud83d\\ude00"}') == {"A": "\U0001f600"}
+
+    def test_lone_surrogate_rejected(self) -> None:
+        """落单的代理字符必须拒绝。
+
+        标准库会接受它，但后续 `json.dumps(...).encode()` 会抛
+        UnicodeEncodeError，异常会直接冲出工具调用。
+        """
+        with pytest.raises(json.JSONDecodeError, match="lone surrogate"):
+            loads('{"A": "\\ud800"}')
+
+    def test_non_str_input_raises_type_error(self) -> None:
+        """非 str 输入应抛 TypeError。"""
+        with pytest.raises(TypeError):
+            loads(b'{"A": 1}')  # type: ignore[arg-type]
+
     def test_unquoted_key_rejected(self) -> None:
         """无引号键必须拒绝（与 MaaFramework 行为一致）。"""
         with pytest.raises(json.JSONDecodeError):
@@ -185,11 +213,30 @@ class TestPipelineFileJsonc:
         assert data["Start"]["next"] == ["Next"]
 
     def test_invalid_jsonc_reports_parse_error(self, tmp_path: Path) -> None:
-        """语法错误仍应抛出带文件名的 ValueError。"""
+        """未闭合的块注释应抛出带文件名与 JSONC 具体原因的 ValueError。"""
         p = tmp_path / "broken.json"
         p.write_text('{"A": 1 /* 未闭合', encoding="utf-8")
 
-        with pytest.raises(ValueError, match="JSON 解析失败"):
+        with pytest.raises(ValueError, match="JSON 解析失败") as excinfo:
+            _read_and_validate_pipelines([str(p)])
+
+        # 断言 JSONC 层的具体原因，避免这条用例在缺少 JSONC 支持时也能通过
+        assert "Unterminated comment" in str(excinfo.value)
+
+    def test_duplicate_key_rejected(self, tmp_path: Path) -> None:
+        """重复的节点名应报错（meojson 同样拒绝）。"""
+        p = tmp_path / "dup.json"
+        p.write_text('{"A": {"x": 1}, "A": {"x": 2}}', encoding="utf-8")
+
+        with pytest.raises(ValueError, match="Duplicate key"):
+            _read_and_validate_pipelines([str(p)])
+
+    def test_non_utf8_file_reports_clear_error(self, tmp_path: Path) -> None:
+        """非 UTF-8 编码的文件应给出明确错误，而不是抛出裸异常。"""
+        p = tmp_path / "gbk.json"
+        p.write_bytes('{"A": "中文"}'.encode("gbk"))
+
+        with pytest.raises(ValueError, match="UTF-8"):
             _read_and_validate_pipelines([str(p)])
 
     def test_load_pipeline_returns_dict_for_jsonc(self, tmp_path: Path) -> None:
@@ -254,6 +301,14 @@ class TestSavePipelineJsonc:
         out = save_pipeline('{"A": 1 /* 未闭合', output_path="c.json")
         assert isinstance(out, str)
         assert "格式错误" in out
+        # 断言 JSONC 层的具体原因，避免这条用例在缺少 JSONC 支持时也能通过
+        assert "Unterminated comment" in out
+
+    def test_overflowing_number_rejected(self, fake_data_dir: Path) -> None:
+        """溢出成 inf 的数字应被拒绝——否则落盘会写出非法的 `Infinity`。"""
+        out = save_pipeline('{"A": {"threshold": 1e999}}', output_path="d.json")
+        assert isinstance(out, str)
+        assert "格式错误" in out
 
 
 # =============================================================================
@@ -287,3 +342,12 @@ class TestInterfaceJsonJsonc:
         assert config is not None
         assert config.child_exec == "python"
         assert config.child_args == ["-u", "agent/main.py"]
+
+    def test_broken_interface_returns_none(self, tmp_path: Path) -> None:
+        """interface.json 解析失败时应返回 None，而不是把异常抛出去。"""
+        (tmp_path / "interface.json").write_text(
+            '{"agent": {"child_exec": "python"} /* 未闭合',
+            encoding="utf-8",
+        )
+
+        assert load_agent_config(str(tmp_path)) is None

@@ -72,6 +72,8 @@ def loads(text: str) -> Any
 | 无引号键、单引号字符串 | ❌ |
 | `NaN` / `Infinity` / `-Infinity` | ❌（stdlib `json` 默认接受，需显式拦截） |
 | 重复键 | ❌（meojson 同样报错） |
+| 落单的代理字符（`"\ud800"`） | ❌（meojson 同样报错；stdlib 接受但会让后续编码崩溃） |
+| 溢出成 `inf` 的数字（`1e999`） | ❌（见下方「有意偏离」） |
 | UTF-8 BOM | ✅（自动剥离） |
 
 ### 实现
@@ -80,13 +82,27 @@ def loads(text: str) -> Any
 
 1. **剥注释**：扫描文本，跟踪字符串字面量与转义状态；注释内容替换成**等长空白**
    （块注释内的换行保留），因此字节偏移与行号完全不变。
-2. **剥尾逗号**：在剥完注释的文本上再扫一遍，跟踪字符串状态，把「其后（跳过空白）
-   是 `}` 或 `]`」的 `,` 替换成空格。
-3. **交给标准库**：`json.loads(cleaned, object_pairs_hook=_reject_duplicates,
-   parse_constant=_reject_constant)`。
+2. **拦非法字面量**：再扫一遍，识别 `NaN` / `Infinity` / `-Infinity` 并报错。
+3. **剥尾逗号**：再扫一遍，把「其后（跳过空白）是 `}` 或 `]`」的 `,` 替换成空格。
+4. **交给标准库**：`json.loads(cleaned, object_pairs_hook=_make_pairs_hook(doc),
+   parse_float=_make_parse_float(doc))`——前者拒绝重复键，后者拒绝溢出数字。
+5. **修代理字符**：解析后递归处理字符串，把 `\uXXXX` 代理对还原成真实码点，
+   落单的代理字符直接报错。
 
 因为偏移量没变，stdlib `JSONDecodeError` 自带的行列号（`line X column Y`）可以直接
-用，不需要自己算位置。
+用，不需要自己算位置（BOM 在解析前被剥掉，带 BOM 的文件位置会偏移一个字符）。
+
+### 有意偏离 meojson 的三处
+
+均因 MaaMCP 与 MaaFramework 的调用方式不同——MaaMCP 要把解析结果重新序列化成严格
+JSON 再交给 `Resource.override_pipeline`：
+
+1. **溢出数字**：`1e999` 会被解析成 `inf`，序列化回去是非法的 `Infinity` 字面量。
+   meojson 把数字当字面量保存能原样往返，MaaMCP 不能，因此直接拒绝。
+2. **顶层值类型**：meojson 只接受对象 / 数组，本模块 `loads` 接受任意顶层值
+   （是否合法交给调用方判断——pipeline 文件另行要求顶层为非空对象）。
+3. **尾部垃圾**：顶层值之后以 `/` 开头的残余内容，meojson 静默忽略，本模块按标准库
+   行为报错。
 
 ### 错误信息
 
@@ -94,7 +110,9 @@ def loads(text: str) -> Any
 |---|---|
 | 块注释未闭合 | `Unterminated comment: line L column C (char N)` |
 | 非法 JSON | 复用 stdlib 的 msg，位置用**原文**重新抛出 |
-| `NaN` / `Infinity` | `NaN/Infinity is not valid JSON: line L column C` |
+| `NaN` / `Infinity` | `NaN is not valid JSON: line L column C` |
+| 溢出数字 | `1e999 is not a finite number`（无位置） |
+| 落单代理字符 | `lone surrogate in string`（无位置） |
 | 重复键 | `Duplicate key 'X'`（无位置，stdlib hook 无法定位） |
 
 ## 接入点
@@ -107,25 +125,28 @@ def loads(text: str) -> Any
 
 ## 兼容性
 
-- 纯 JSON 是合法 JSONC → 现有行为不变，现有测试应全绿。
-- MaaMCP 交给 MaaFramework 的永远是 `json.dumps` 产出的严格 JSON → MaaFramework 侧零风险。
-- 唯一新增的严格性是重复键报错，有意为之：meojson 也报错，且能挡掉「pipeline 文件里
-  节点名写重了」这类真实错误。
+- 纯 JSON 是合法 JSONC → 现有行为不变，现有测试全绿。
+- MaaMCP 交给 MaaFramework 的永远是**重新序列化出来的严格 JSON**（由 maafw 的
+  `override_pipeline` 内部做 `json.dumps`）→ MaaFramework 侧零风险。
+- 新增的严格性（有意为之，与 meojson 一致）：重复键报错、落单代理字符报错、
+  溢出数字报错。前两者能挡掉「节点名写重了」「文件里有坏编码」这类真实问题。
 
 ## 测试
 
-新增 `tests/test_jsonc.py`：
+新增 `tests/test_jsonc.py`（按仓库既有惯例整体标 `@pytest.mark.unit`）：
 
-- **单元**：行/块注释、尾逗号、字符串内含 `//` 与 `/* */`、转义引号、未闭合块注释、
-  重复键、NaN/Infinity、BOM、错误行列号正确。
-- **集成**：带注释的 pipeline 文件能被 `load_pipeline` 读出；`save_pipeline` 接受带注释
-  的输入且落盘为标准 JSON；`interface.json` 带注释时 agent 配置仍能读到。
+- **解析器**：行/块注释、尾逗号、字符串内含 `//` 与 `/* */`、转义引号、未闭合块注释、
+  重复键、NaN/Infinity、溢出数字、代理对与落单代理、BOM、非 str 输入、错误行列号正确。
+- **工具层**：带注释的 pipeline 文件能被 `_read_and_validate_pipelines` /
+  `load_pipeline` 读出；重复键与非 UTF-8 文件给出明确错误；`save_pipeline` 接受带注释
+  的输入且落盘为标准 JSON；`interface.json` 带注释时 agent 配置仍能读到，坏文件返回
+  None 而不抛异常。
 
 ## 文档
 
 - `CLAUDE.md` / `CLAUDE_CN.md`：同步加一条「pipeline 文件与 interface.json 支持 JSONC」。
-- `load_pipeline` / `save_pipeline` / `run_pipeline` 的工具描述里点明——工具描述就是
-  AI 读到的说明书。
+- `load_pipeline` / `save_pipeline` / `run_pipeline` / `benchmark_node` 的工具描述里
+  点明——工具描述就是 AI 读到的说明书。
 
 ## 不做的事
 

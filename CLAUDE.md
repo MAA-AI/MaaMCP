@@ -96,11 +96,13 @@ MaaFramework's own pipeline parser (meojson `json::parsec`) accepts JSONC, so Ma
 [jsonc.py](maa_mcp/jsonc.py) re-implements that semantics in Python (zero new dependencies):
 
 - Allowed: `//` line comments, `/* */` block comments, trailing commas in objects/arrays
-- Rejected (same as MaaFramework): unquoted keys, single-quoted strings, `NaN` / `Infinity`, duplicate keys
+- Rejected (same as MaaFramework): unquoted keys, single-quoted strings, `NaN` / `Infinity`, duplicate keys, lone surrogates (e.g. `"\ud800"`)
 
 Where it applies: pipeline files read by `load_pipeline` / `run_pipeline` / `benchmark_node`, the `pipeline_json` string passed to `save_pipeline` (output is still normalized standard JSON — comments are dropped), and `interface.json` read by the agent supervisor.
 
-Implementation note: comments are replaced with equal-length whitespace (newlines preserved), then trailing commas are stripped, then the text goes to stdlib `json.loads`. Byte offsets are preserved, so stdlib's line/column error positions apply directly to the original file.
+Implementation note: comments are replaced with equal-length whitespace (newlines preserved), then trailing commas are stripped, then the text goes to stdlib `json.loads`. Byte offsets are preserved, so stdlib's line/column error positions apply directly to the original file (a leading UTF-8 BOM shifts them by one character, since the BOM is stripped before parsing).
+
+Three deliberate deviations from meojson, because MaaMCP re-serializes the parsed result into strict JSON for `Resource.override_pipeline`: numbers that overflow to `inf` (`1e999`) are rejected (they would serialize back as the invalid literal `Infinity`), `loads` accepts any top-level value while meojson only accepts objects/arrays (callers still require a non-empty object), and trailing garbage after the top-level value is rejected instead of silently ignored.
 
 ### Agent Subprocess Lifecycle (Custom Action Support)
 
