@@ -49,10 +49,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/MistEO/MaaMCP"
-Documentation = "https://github.com/MistEO/MaaMCP#readme"
-Repository = "https://github.com/MistEO/MaaMCP"
-Issues = "https://github.com/MistEO/MaaMCP/issues"
+Homepage = "https://github.com/MAA-AI/MaaMCP"
+Documentation = "https://github.com/MAA-AI/MaaMCP#readme"
+Repository = "https://github.com/MAA-AI/MaaMCP"
+Issues = "https://github.com/MAA-AI/MaaMCP/issues"
 
 [project.scripts]
 maa-mcp = "maa_mcp.__main__:main"
