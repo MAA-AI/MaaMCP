@@ -236,6 +236,26 @@ class TestJsoncLoads:
 
         assert len(_strip_comments(text)) == len(text)
 
+    def test_value_error_converted_to_decode_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """json.loads 抛出的 ValueError 必须转成 JsoncDecodeError。
+
+        解释器的整数位数限制（Python 3.10.7+）就是这么抛的——它不是
+        JSONDecodeError，会逃出调用方的 `except json.JSONDecodeError` 分支。
+        这里用 monkeypatch 模拟，不依赖解释器版本与限制是否生效。
+        """
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise ValueError(
+                "Exceeds the limit (4300 digits) for integer string conversion"
+            )
+
+        monkeypatch.setattr(json, "loads", boom)
+
+        with pytest.raises(json.JSONDecodeError, match="invalid number"):
+            loads('{"A": 1}')
+
     def test_huge_integer_reported_as_decode_error(self) -> None:
         """超大整数应转成 JSONDecodeError，而不是逃出裸 ValueError。
 
@@ -247,11 +267,12 @@ class TestJsoncLoads:
         if setter is None:
             pytest.skip("当前解释器没有整数位数限制")
 
+        # 解释器要求上限至少是 640（0 表示不限制），取最小值再超一点
         old = sys.get_int_max_str_digits()
-        setter(20)
+        setter(640)
         try:
             try:
-                loads('{"A": ' + "9" * 50 + "}")
+                loads('{"A": ' + "9" * 700 + "}")
             except json.JSONDecodeError:
                 pass  # 期望路径：已转成 JSONDecodeError 子类
             except ValueError as e:
