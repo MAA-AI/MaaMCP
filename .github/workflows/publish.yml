@@ -11,8 +11,68 @@ on:
         required: false
 
 jobs:
+  changelog:
+    name: Generate changelog
+    runs-on: ubuntu-latest
+    outputs:
+      release_body: ${{ steps.git-cliff.outputs.content || steps.fallback.outputs.body }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git-cliff 需要完整历史与 tag 才能算出版本区间
+          ref: ${{ inputs.tag || github.ref }} # 检出版本对应的 tag，--current 才有归属
+
+      - name: Determine release tag
+        id: meta
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [[ "$tag" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate a changelog
+        uses: orhun/git-cliff-action@v4
+        id: git-cliff
+        continue-on-error: true # 生成失败时退回静态说明，不阻塞发版
+        with:
+          config: .github/cliff.toml
+          # --current 只处理「属于当前 tag 的提交」，即本次要发布的这一版；
+          # --strip header 去掉「更新日志」大标题
+          # 正式版加 tag-pattern 把基线锁定在「上一个正式版」，这样 beta 期间的
+          # 提交也会并入本次发布说明；预发布版则用上一个任意 tag 作为基线
+          args: >-
+            -vv --current --strip header
+            ${{ steps.meta.outputs.is_prerelease == 'false' && '--tag-pattern "^v[0-9]+[.][0-9]+[.][0-9]+$"' || '' }}
+        env:
+          OUTPUT: CHANGES.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Fallback release body
+        id: fallback
+        run: |
+          {
+            echo 'body<<CHANGES_EOF'
+            echo '# Installation'
+            echo ''
+            echo '```sh'
+            echo "pip install maa-mcp==${{ inputs.tag || github.ref_name }}"
+            echo '```'
+            echo ''
+            echo '# Usage'
+            echo ''
+            echo '```sh'
+            echo 'maa-mcp'
+            echo '```'
+            echo 'CHANGES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
   build:
     name: Build distribution
+    needs: changelog
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,18 +101,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ inputs.tag || github.ref_name }}
-          body: "# Installation
-
-            ```sh
-            pip install maa-mcp==${{ inputs.tag || github.ref_name }}
-            ```
-
-            # Usage
-
-            ```sh
-            maa-mcp
-            ```
-          "
+          body: ${{ needs.changelog.outputs.release_body }}
 
   publish-to-pypi:
     name: Publish to PyPI
