@@ -127,7 +127,7 @@ def load_agent_config(resource_path: Optional[str]) -> Optional[AgentConfig]:
             continue
         try:
             data = jsonc_loads(cfg_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError, RecursionError) as e:
             logger.warning(f"解析 {cfg_path} 失败: {e}")
             return None
         if not isinstance(data, dict):

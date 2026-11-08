@@ -102,7 +102,9 @@ Where it applies: pipeline files read by `load_pipeline` / `run_pipeline` / `ben
 
 Implementation note: comments are replaced with equal-length whitespace (newlines preserved), then trailing commas are stripped, then the text goes to stdlib `json.loads`. Byte offsets are preserved, so stdlib's line/column error positions apply directly to the original file (a leading UTF-8 BOM shifts them by one character, since the BOM is stripped before parsing).
 
-Three deliberate deviations from meojson, because MaaMCP re-serializes the parsed result into strict JSON for `Resource.override_pipeline`: numbers that overflow to `inf` (`1e999`) are rejected (they would serialize back as the invalid literal `Infinity`), `loads` accepts any top-level value while meojson only accepts objects/arrays (callers still require a non-empty object), and trailing garbage after the top-level value is rejected instead of silently ignored.
+Two deliberate deviations from meojson, both because MaaMCP re-serializes the parsed result into strict JSON for `Resource.override_pipeline`: numbers that overflow to `inf` (`1e999`) are rejected (meojson keeps the literal and can round-trip it; we would write back the invalid literal `Infinity`), and `loads` accepts any top-level value while meojson only accepts objects/arrays (callers still require a non-empty object).
+
+`interface.json` caveat: MaaMCP tolerates comments there, and so does MFAAvalonia (Newtonsoft.Json skips comments). But MAAGC's own `agent/main.py` reads that file with stdlib `json.load` to detect the version — a commented `interface.json` makes it log an exception and fall back to version `"unknown"` (it only decides dev-mode vs. venv setup). Keep `interface.json` comment-free if you rely on MAAGC's version detection.
 
 ### Agent Subprocess Lifecycle (Custom Action Support)
 

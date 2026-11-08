@@ -92,7 +92,7 @@ def loads(text: str) -> Any
 因为偏移量没变，stdlib `JSONDecodeError` 自带的行列号（`line X column Y`）可以直接
 用，不需要自己算位置（BOM 在解析前被剥掉，带 BOM 的文件位置会偏移一个字符）。
 
-### 有意偏离 meojson 的三处
+### 有意偏离 meojson 的两处
 
 均因 MaaMCP 与 MaaFramework 的调用方式不同——MaaMCP 要把解析结果重新序列化成严格
 JSON 再交给 `Resource.override_pipeline`：
@@ -101,8 +101,9 @@ JSON 再交给 `Resource.override_pipeline`：
    meojson 把数字当字面量保存能原样往返，MaaMCP 不能，因此直接拒绝。
 2. **顶层值类型**：meojson 只接受对象 / 数组，本模块 `loads` 接受任意顶层值
    （是否合法交给调用方判断——pipeline 文件另行要求顶层为非空对象）。
-3. **尾部垃圾**：顶层值之后以 `/` 开头的残余内容，meojson 静默忽略，本模块按标准库
-   行为报错。
+
+已确认与 meojson **一致**（无需偏离）：注释、尾逗号、重复键、NaN / Infinity、
+落单代理字符、顶层值之后的尾部垃圾（两者都报错）、顶层值之后的尾部注释（两者都接受）。
 
 ### 错误信息
 
@@ -117,19 +118,20 @@ JSON 再交给 `Resource.override_pipeline`：
 
 ## 接入点
 
-| 位置 | 现状 | 影响范围 |
+| 位置 | 原实现 → 现实现 | 影响范围 |
 |---|---|---|
-| `pipeline_tools.py` `_read_and_validate_pipelines` | `json.load(fh)` | `load_pipeline` / `run_pipeline` / `benchmark_node`（三处共用该函数） |
-| `pipeline_tools.py` `save_pipeline` | `json.loads(pipeline_json)` | 校验输入字符串；**写盘仍是 `json.dump(indent=2)` 的标准 JSON**，注释丢弃 |
-| `agent_supervisor.py` `load_agent_config` | `json.loads(...)` | `interface.json` 允许注释，与 MaaFramework 读 interface.json 的行为对齐 |
+| `pipeline_tools.py` `_read_and_validate_pipelines` | `json.load(fh)` → `jsonc_loads(fh.read())` | `load_pipeline` / `run_pipeline` / `benchmark_node`（三处共用该函数） |
+| `pipeline_tools.py` `save_pipeline` | `json.loads(pipeline_json)` → `jsonc_loads(pipeline_json)` | 校验输入字符串；**写盘仍是 `json.dump(indent=2)` 的标准 JSON**，注释丢弃 |
+| `agent_supervisor.py` `load_agent_config` | `json.loads(...)` → `jsonc_loads(...)` | `interface.json` 允许注释——与 MFAAvalonia（Newtonsoft.Json，容忍注释）对齐；MaaFramework 本身不读 `interface.json` |
 
 ## 兼容性
 
 - 纯 JSON 是合法 JSONC → 现有行为不变，现有测试全绿。
 - MaaMCP 交给 MaaFramework 的永远是**重新序列化出来的严格 JSON**（由 maafw 的
   `override_pipeline` 内部做 `json.dumps`）→ MaaFramework 侧零风险。
-- 新增的严格性（有意为之，与 meojson 一致）：重复键报错、落单代理字符报错、
-  溢出数字报错。前两者能挡掉「节点名写重了」「文件里有坏编码」这类真实问题。
+- 新增的严格性：重复键报错、落单代理字符报错（这两条与 meojson 一致，能挡掉
+  「节点名写重了」「文件里有坏编码」这类真实问题），以及溢出数字报错
+  （这一条是上文的有意偏离，防止落盘写出非法的 `Infinity`）。
 
 ## 测试
 

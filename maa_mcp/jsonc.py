@@ -17,16 +17,13 @@ MaaFramework 能读的文件保持一致——否则同一份 pipeline，MaaFram
 （保留换行），再剥掉尾逗号，最后交给标准库 `json.loads`。空白替换保留了字节
 偏移，因此标准库 `JSONDecodeError` 自带的行列号可以直接沿用，无需自己算位置。
 
-已知的三处有意偏离（均因 MaaMCP 与 MaaFramework 的调用方式不同）：
+已知的两处有意偏离（均因 MaaMCP 与 MaaFramework 的调用方式不同）：
 
 1. **顶层值类型**：meojson 只接受对象 / 数组，本模块的 `loads` 接受任意顶层值
    （是否合法由调用方判断——pipeline 文件另行要求顶层为非空对象）。
-2. **溢出数字**：MaaMCP 把解析结果重新序列化成严格 JSON 再交给
-   `Resource.override_pipeline`，而 MaaFramework 的解析器走严格 JSON。因此
-   `1e999` 这类溢出成 `inf` 的数字在这里被拒绝——否则落盘会写出非法的
-   `Infinity` 字面量。
-3. **尾部垃圾**：顶层值之后以 `/` 开头的残余内容，meojson 会静默忽略，本模块
-   按标准库行为报错。
+2. **溢出数字**：meojson 把数字当字面量保存，`1e999` 能原样往返；但 MaaMCP 要
+   把解析结果重新序列化成严格 JSON 再交给 `Resource.override_pipeline`，
+   `1e999` 解析成 `inf` 后落盘会写出非法的 `Infinity` 字面量，因此这里显式拒绝。
 """
 
 from __future__ import annotations

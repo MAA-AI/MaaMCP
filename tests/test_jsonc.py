@@ -175,6 +175,36 @@ class TestJsoncLoads:
             loads('{"A": 1, "A": 2}')
         assert "line" not in str(excinfo.value)
 
+    def test_trailing_garbage_rejected(self) -> None:
+        """顶层值之后的尾部垃圾应报错（meojson 同样报错）。"""
+        with pytest.raises(json.JSONDecodeError):
+            loads('{"A": 1} garbage')
+
+    def test_trailing_comment_accepted(self) -> None:
+        """顶层值之后的注释应被忽略（meojson 同样接受）。"""
+        assert loads('{"A": 1} // done') == {"A": 1}
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "{}",
+            "[]",
+            '{"a": 1}',
+            '{"a": [1, 2, {"b": null}]}',
+            '{"s": "he said \\"hi\\" // x"}',
+            '{"u": "\\u4f60\\u597d"}',
+            '{"esc": "a\\\\b"}',
+            '{"n": [0, -0, 1e5, 1E5, -1.5e-3, 0.0]}',
+            '{"t": true, "f": false, "z": null}',
+            '{"nested": {"a": {"b": {"c": [[[1]]]}}}}',
+            '{"slash": "a/b"}',
+            '{"emoji": "😀 中文"}',
+        ],
+    )
+    def test_matches_stdlib_for_plain_json(self, payload: str) -> None:
+        """纯 JSON 的解析结果必须与标准库完全一致（JSON 是 JSONC 的子集）。"""
+        assert loads(payload) == json.loads(payload)
+
 
 # =============================================================================
 # pipeline 文件读取
@@ -237,6 +267,14 @@ class TestPipelineFileJsonc:
         p.write_bytes('{"A": "中文"}'.encode("gbk"))
 
         with pytest.raises(ValueError, match="UTF-8"):
+            _read_and_validate_pipelines([str(p)])
+
+    def test_deeply_nested_reports_clear_error(self, tmp_path: Path) -> None:
+        """嵌套层级过深应给出明确错误，而不是抛出未捕获的 RecursionError。"""
+        p = tmp_path / "deep.json"
+        p.write_text("[" * 2000 + "]" * 2000, encoding="utf-8")
+
+        with pytest.raises(ValueError, match="嵌套层级过深"):
             _read_and_validate_pipelines([str(p)])
 
     def test_load_pipeline_returns_dict_for_jsonc(self, tmp_path: Path) -> None:
@@ -309,6 +347,12 @@ class TestSavePipelineJsonc:
         out = save_pipeline('{"A": {"threshold": 1e999}}', output_path="d.json")
         assert isinstance(out, str)
         assert "格式错误" in out
+
+    def test_deeply_nested_reports_error(self, fake_data_dir: Path) -> None:
+        """嵌套层级过深应返回错误信息，而不是抛出未捕获的 RecursionError。"""
+        out = save_pipeline("[" * 2000 + "]" * 2000, output_path="e.json")
+        assert isinstance(out, str)
+        assert "嵌套层级过深" in out
 
 
 # =============================================================================

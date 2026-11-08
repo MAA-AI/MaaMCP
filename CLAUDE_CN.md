@@ -102,7 +102,9 @@ MaaFramework 自带的 pipeline 解析器（meojson 的 `json::parsec`）接受 
 
 实现要点：先把注释替换成等长空白（保留换行），再剥掉尾逗号，最后交给标准库 `json.loads`。字节偏移保持不变，因此标准库自带的行列号报错可直接对到原文件（文件带 UTF-8 BOM 时位置会偏移一个字符——BOM 在解析前被剥掉）。
 
-三处有意偏离 meojson，都因为 MaaMCP 会把解析结果重新序列化成严格 JSON 再交给 `Resource.override_pipeline`：溢出成 `inf` 的数字（`1e999`）会被拒绝（否则序列化回去是非法的 `Infinity` 字面量）；`loads` 接受任意顶层值，而 meojson 只接受对象/数组（调用方仍要求顶层为非空对象）；顶层值之后的尾部垃圾按标准库行为报错，而 meojson 会静默忽略。
+两处有意偏离 meojson，都因为 MaaMCP 会把解析结果重新序列化成严格 JSON 再交给 `Resource.override_pipeline`：溢出成 `inf` 的数字（`1e999`）会被拒绝（meojson 按字面量保存能原样往返，我们写回去会是非法的 `Infinity` 字面量）；`loads` 接受任意顶层值，而 meojson 只接受对象/数组（调用方仍要求顶层为非空对象）。
+
+`interface.json` 的注意事项：MaaMCP 这里容忍注释，MFAAvalonia 也容忍（Newtonsoft.Json 会跳过注释）。但 MAAGC 自己的 `agent/main.py` 用标准库 `json.load` 读同一个文件来检测版本——带注释的 `interface.json` 会让它记一条异常并回退到版本 `"unknown"`（该值只用来区分 dev 模式与 venv 准备）。依赖 MAAGC 版本检测时，`interface.json` 保持无注释。
 
 ### Agent 子进程生命周期（Custom Action 支持）
 

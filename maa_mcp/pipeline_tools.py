@@ -540,6 +540,8 @@ def _read_and_validate_pipelines(
             raise ValueError(f"Pipeline JSON 解析失败: {f}: {e}") from e
         except UnicodeDecodeError as e:
             raise ValueError(f"Pipeline 文件不是合法的 UTF-8 文本: {f}: {e}") from e
+        except RecursionError as e:
+            raise ValueError(f"Pipeline JSON 嵌套层级过深: {f}: {e}") from e
         if not isinstance(data, dict) or not data:
             raise ValueError(f"Pipeline 文件格式错误（顶层必须是非空对象）: {f}")
         result.append((str(path.absolute()), data))
@@ -884,6 +886,8 @@ def save_pipeline(
         pipeline = jsonc_loads(pipeline_json)
     except json.JSONDecodeError as e:
         return f"Pipeline JSON 格式错误: {e}"
+    except RecursionError as e:
+        return f"Pipeline JSON 嵌套层级过深: {e}"
 
     # 验证 Pipeline 结构：必须是以节点名为键的非空对象
     if not isinstance(pipeline, dict):
