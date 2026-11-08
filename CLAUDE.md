@@ -95,14 +95,18 @@ MaaFramework's own pipeline parser (meojson `json::parsec`) accepts JSONC, so Ma
 
 [jsonc.py](maa_mcp/jsonc.py) re-implements that semantics in Python (zero new dependencies):
 
-- Allowed: `//` line comments, `/* */` block comments, trailing commas in objects/arrays
+- Allowed: `//` line comments, `/* */` block comments, trailing commas in objects/arrays (a comma in an *empty* container — `{,}` / `[,]` — is still a syntax error, same as MaaFramework)
 - Rejected (same as MaaFramework): unquoted keys, single-quoted strings, `NaN` / `Infinity`, duplicate keys, lone surrogates (e.g. `"\ud800"`)
 
 Where it applies: pipeline files read by `load_pipeline` / `run_pipeline` / `benchmark_node`, the `pipeline_json` string passed to `save_pipeline` (output is still normalized standard JSON — comments are dropped), and `interface.json` read by the agent supervisor.
 
 Implementation note: comments are replaced with equal-length whitespace (newlines preserved), then trailing commas are stripped, then the text goes to stdlib `json.loads`. Byte offsets are preserved, so stdlib's line/column error positions apply directly to the original file (a leading UTF-8 BOM shifts them by one character, since the BOM is stripped before parsing).
 
-Two deliberate deviations from meojson, both because MaaMCP re-serializes the parsed result into strict JSON for `Resource.override_pipeline`: numbers that overflow to `inf` (`1e999`) are rejected (meojson keeps the literal and can round-trip it; we would write back the invalid literal `Infinity`), and `loads` accepts any top-level value while meojson only accepts objects/arrays (callers still require a non-empty object).
+Three deliberate deviations from meojson:
+
+1. Numbers that overflow to `inf` (`1e999`) are rejected — MaaMCP re-serializes the parsed result into strict JSON for `Resource.override_pipeline`, so meojson's literal round-trip would write back the invalid literal `Infinity`.
+2. `loads` accepts any top-level value while meojson only accepts objects/arrays (callers still require a non-empty object).
+3. Trailing residue __after__ the top-level value is reported as an error. meojson's `skip_whitespace` conflates "end of input" with "malformed comment start", so it silently accepts and discards a trailing `/x` or an unterminated block comment; MaaFramework inherits that. This direction is __stricter__ — MaaMCP never accepts a file MaaFramework rejects. An unterminated comment __inside__ the document is rejected by both.
 
 `interface.json` caveat: MaaMCP tolerates comments there, and so does MFAAvalonia (Newtonsoft.Json skips comments). But MAAGC's own `agent/main.py` reads that file with stdlib `json.load` to detect the version — a commented `interface.json` makes it log an exception and fall back to version `"unknown"` (it only decides dev-mode vs. venv setup). Keep `interface.json` comment-free if you rely on MAAGC's version detection.
 

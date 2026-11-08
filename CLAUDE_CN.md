@@ -95,14 +95,18 @@ MaaFramework 自带的 pipeline 解析器（meojson 的 `json::parsec`）接受 
 
 [jsonc.py](maa_mcp/jsonc.py) 在 Python 侧复刻了这套语义（不引入任何新依赖）：
 
-- 允许：`//` 行注释、`/* */` 块注释、对象/数组尾逗号
+- 允许：`//` 行注释、`/* */` 块注释、对象/数组尾逗号（__空__容器里的逗号 `{,}` / `[,]` 仍是语法错误，与 MaaFramework 一致）
 - 拒绝（与 MaaFramework 一致）：无引号键、单引号字符串、`NaN` / `Infinity`、重复键、落单的代理字符（如 `"\ud800"`）
 
 生效范围：`load_pipeline` / `run_pipeline` / `benchmark_node` 读取的 pipeline 文件、`save_pipeline` 的 `pipeline_json` 输入字符串（落盘仍是格式化后的标准 JSON，注释丢弃）、以及 agent supervisor 读取的 `interface.json`。
 
 实现要点：先把注释替换成等长空白（保留换行），再剥掉尾逗号，最后交给标准库 `json.loads`。字节偏移保持不变，因此标准库自带的行列号报错可直接对到原文件（文件带 UTF-8 BOM 时位置会偏移一个字符——BOM 在解析前被剥掉）。
 
-两处有意偏离 meojson，都因为 MaaMCP 会把解析结果重新序列化成严格 JSON 再交给 `Resource.override_pipeline`：溢出成 `inf` 的数字（`1e999`）会被拒绝（meojson 按字面量保存能原样往返，我们写回去会是非法的 `Infinity` 字面量）；`loads` 接受任意顶层值，而 meojson 只接受对象/数组（调用方仍要求顶层为非空对象）。
+三处有意偏离 meojson：
+
+1. 溢出成 `inf` 的数字（`1e999`）会被拒绝——MaaMCP 会把解析结果重新序列化成严格 JSON 再交给 `Resource.override_pipeline`，meojson 按字面量保存能原样往返，我们写回去会是非法的 `Infinity` 字面量。
+2. `loads` 接受任意顶层值，而 meojson 只接受对象/数组（调用方仍要求顶层为非空对象）。
+3. 顶层值__之后__的尾部残余按错误处理。meojson 的 `skip_whitespace` 把「已到输入末尾」与「注释起始符非法」混为一谈，会静默接受并丢弃尾部残余（如 `/x` 或未闭合的块注释），MaaFramework 继承了这一行为。这一处的方向是「更严」——MaaMCP 不会接受 MaaFramework 拒绝的文件；未闭合注释出现在文档__内部__时两边都拒绝。
 
 `interface.json` 的注意事项：MaaMCP 这里容忍注释，MFAAvalonia 也容忍（Newtonsoft.Json 会跳过注释）。但 MAAGC 自己的 `agent/main.py` 用标准库 `json.load` 读同一个文件来检测版本——带注释的 `interface.json` 会让它记一条异常并回退到版本 `"unknown"`（该值只用来区分 dev 模式与 venv 准备）。依赖 MAAGC 版本检测时，`interface.json` 保持无注释。
 

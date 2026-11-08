@@ -184,6 +184,32 @@ class TestJsoncLoads:
         """顶层值之后的注释应被忽略（meojson 同样接受）。"""
         assert loads('{"A": 1} // done') == {"A": 1}
 
+    def test_empty_container_comma_rejected(self) -> None:
+        """空容器里的逗号是语法错误（MaaFramework 同样拒绝）。
+
+        meojson 的解析循环必须先完成一个键值对才会收尾，所以 `{,}`、`[,]`
+        都是错误；这里若放行，MaaMCP 就会接受 MaaFramework 拒绝的文件。
+        """
+        with pytest.raises(json.JSONDecodeError):
+            loads('{"a": {,}}')
+        with pytest.raises(json.JSONDecodeError):
+            loads('{"a": [,]}')
+
+    def test_leading_comma_rejected(self) -> None:
+        """容器开头的逗号是语法错误（MaaFramework 同样拒绝）。"""
+        with pytest.raises(json.JSONDecodeError):
+            loads('{, "a": 1}')
+
+    def test_trailing_slash_residue_rejected(self) -> None:
+        """顶层值之后的 `/x` 残余应报错。
+
+        这是与 meojson 的一处有意偏离：meojson 的 `skip_whitespace` 把「已到输入
+        末尾」与「注释起始符非法」混为一谈，会静默丢弃残余；本模块按标准库语义
+        报错（方向是更严，不会接受 MaaFramework 拒绝的文件）。
+        """
+        with pytest.raises(json.JSONDecodeError):
+            loads('{"A": 1}/x')
+
     @pytest.mark.parametrize(
         "payload",
         [

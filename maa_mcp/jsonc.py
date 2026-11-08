@@ -9,7 +9,8 @@ MaaFramework 能读的文件保持一致——否则同一份 pipeline，MaaFram
 与 MaaFramework（= meojson `json::parsec`）一致的接受集合：
 
 - 允许 `//` 行注释、`/* */` 块注释
-- 允许对象 / 数组尾逗号
+- 允许对象 / 数组尾逗号（但 `{,}`、`[,]` 这类空容器里的逗号是语法错误，
+  MaaFramework 同样拒绝）
 - 其余严格遵循 JSON 规范：键必须是双引号字符串，拒绝单引号、拒绝
   NaN / Infinity、拒绝重复键、拒绝落单的代理字符（`\\uD800` 之类）
 
@@ -17,13 +18,19 @@ MaaFramework 能读的文件保持一致——否则同一份 pipeline，MaaFram
 （保留换行），再剥掉尾逗号，最后交给标准库 `json.loads`。空白替换保留了字节
 偏移，因此标准库 `JSONDecodeError` 自带的行列号可以直接沿用，无需自己算位置。
 
-已知的两处有意偏离（均因 MaaMCP 与 MaaFramework 的调用方式不同）：
+已知的三处有意偏离：
 
 1. **顶层值类型**：meojson 只接受对象 / 数组，本模块的 `loads` 接受任意顶层值
    （是否合法由调用方判断——pipeline 文件另行要求顶层为非空对象）。
 2. **溢出数字**：meojson 把数字当字面量保存，`1e999` 能原样往返；但 MaaMCP 要
    把解析结果重新序列化成严格 JSON 再交给 `Resource.override_pipeline`，
    `1e999` 解析成 `inf` 后落盘会写出非法的 `Infinity` 字面量，因此这里显式拒绝。
+3. **顶层值之后的尾部残余**：meojson 的 `skip_whitespace` 把「已到输入末尾」与
+   「注释起始符非法」混为一谈——顶层值之后出现 `/x` 或未闭合的块注释时，它会
+   静默接受并丢弃残余，MaaFramework 继承了这一行为。本模块按标准库语义报错。
+   方向是「更严」：MaaMCP 不会接受 MaaFramework 拒绝的文件，只会在这类病态的
+   尾部残余上报错（`Extra data` / `Unterminated comment`）。
+   注：未闭合注释出现在文档**内部**时，两边都拒绝，行为一致。
 """
 
 from __future__ import annotations
@@ -115,11 +122,19 @@ def _strip_comments(text: str) -> str:
 
 
 def _strip_trailing_commas(text: str) -> str:
-    """把对象 / 数组的尾逗号替换成空格。"""
+    """把对象 / 数组的尾逗号替换成空格。
+
+    只有「前面已经有过至少一个成员」的逗号才算尾逗号——meojson 的解析循环在
+    取到 `}` / `]` 之前必须先完成一个键值对，所以 `{,}`、`[,]` 这类空容器里
+    的逗号是语法错误，MaaFramework 会拒绝。这里必须同样拒绝，否则 MaaMCP
+    会接受 MaaFramework 拒绝的文件。
+    """
     out = list(text)
     i = 0
     n = len(text)
     in_string = False
+    # 上一个非空白字符；字符串按整体的结束引号计
+    prev = ""
 
     while i < n:
         ch = text[i]
@@ -129,6 +144,7 @@ def _strip_trailing_commas(text: str) -> str:
                 continue
             if ch == '"':
                 in_string = False
+                prev = '"'
             i += 1
             continue
 
@@ -137,14 +153,22 @@ def _strip_trailing_commas(text: str) -> str:
             i += 1
             continue
 
+        if ch in _WHITESPACE:
+            i += 1
+            continue
+
         if ch == ",":
-            # 逗号后（跳过空白）紧跟 } 或 ] 即为尾逗号
+            # 逗号后（跳过空白）紧跟 } 或 ]，且前面已有成员 → 尾逗号
             j = i + 1
             while j < n and text[j] in _WHITESPACE:
                 j += 1
-            if j < n and text[j] in "}]":
+            if j < n and text[j] in "}]" and prev not in "{[,":
                 out[i] = " "
+            prev = ","
+            i += 1
+            continue
 
+        prev = ch
         i += 1
 
     return "".join(out)
@@ -243,7 +267,7 @@ def _decode_surrogates(text: str, doc: str) -> str:
     if not any(0xD800 <= ord(ch) <= 0xDFFF for ch in text):
         return text
 
-    out: List[str] = []
+    out: list[str] = []
     i = 0
     n = len(text)
     while i < n:
