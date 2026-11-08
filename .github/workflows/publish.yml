@@ -30,7 +30,6 @@ jobs:
         id: meta
         run: |
           tag="${{ inputs.tag || github.ref_name }}"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           if [[ "$tag" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
             echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
           else

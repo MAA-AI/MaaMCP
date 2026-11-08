@@ -1,0 +1,90 @@
+name: Changelog self-test (temporary)
+
+# 临时自检（验证完即删）：按 publish.yml 的真实参数验证 changelog job
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/_changelog_selftest.yml"
+
+jobs:
+  selftest:
+    name: Self-test changelog generation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      release_body: ${{ steps.git-cliff.outputs.content || steps.fallback.outputs.body }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # 与 publish.yml 一致：检出目标 tag（detached HEAD 落在 tag 上）
+          ref: v1.3.0
+
+      - name: Show checkout state
+        run: |
+          echo "HEAD sha: $(git rev-parse HEAD)"
+          echo "HEAD tag: $(git describe --tags --exact-match HEAD)"
+          echo "all tags: $(git tag --list 'v*' | tr '\n' ' ')"
+
+      - name: Determine release tag
+        id: meta
+        run: |
+          tag="v1.3.0"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [[ "$tag" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate a changelog
+        uses: orhun/git-cliff-action@v4
+        id: git-cliff
+        continue-on-error: true
+        with:
+          config: .github/cliff.toml
+          args: >-
+            -vv --current --strip header
+            ${{ steps.meta.outputs.is_prerelease == 'false' && '--tag-pattern "^v[0-9]+[.][0-9]+[.][0-9]+$"' || '' }}
+        env:
+          OUTPUT: CHANGES.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Fallback release body
+        id: fallback
+        run: |
+          {
+            echo 'body<<CHANGES_EOF'
+            echo 'FALLBACK-USED'
+            echo 'CHANGES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Report
+        env:
+          RELEASE_BODY: ${{ steps.git-cliff.outputs.content || steps.fallback.outputs.body }}
+        run: |
+          echo "### git-cliff exit_code: ${{ steps.git-cliff.outputs.exit_code }}"
+          echo "### version output: ${{ steps.git-cliff.outputs.version }}"
+          echo "----- BEGIN release_body -----"
+          printf '%s\n' "$RELEASE_BODY"
+          echo "----- END release_body -----"
+
+      - name: Fail if fallback was used
+        if: contains(steps.git-cliff.outputs.content || steps.fallback.outputs.body, 'FALLBACK-USED')
+        run: |
+          echo "::error::changelog generation fell back to the static body"
+          exit 1
+
+      - name: Assert the changelog mentions the released version
+        if: ${{ !contains(steps.git-cliff.outputs.content || steps.fallback.outputs.body, 'FALLBACK-USED') }}
+        env:
+          RELEASE_BODY: ${{ steps.git-cliff.outputs.content || steps.fallback.outputs.body }}
+        run: |
+          if [[ "$RELEASE_BODY" != *"## 1.3.0"* ]]; then
+            echo "::error::changelog body does not contain '## 1.3.0'"
+            exit 1
+          fi
+          echo "OK: changelog body contains '## 1.3.0'"
