@@ -21,18 +21,21 @@ jobs:
         with:
           fetch-depth: 0
           # 与 publish.yml 一致：检出目标 tag（detached HEAD 落在 tag 上）
-          ref: v1.3.0
+          # 用本 PR 的分支头模拟一个「已包含 cliff.toml 的正式版 tag」
+          ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Show checkout state
+      - name: Simulate release checkout
         run: |
+          git tag -f v9.9.9 "${{ github.event.pull_request.head.sha }}"
+          git checkout --quiet v9.9.9
           echo "HEAD sha: $(git rev-parse HEAD)"
           echo "HEAD tag: $(git describe --tags --exact-match HEAD)"
-          echo "all tags: $(git tag --list 'v*' | tr '\n' ' ')"
+          echo "cliff.toml present: $(test -f .github/cliff.toml && echo yes || echo no)"
 
       - name: Determine release tag
         id: meta
         run: |
-          tag="v1.3.0"
+          tag="v9.9.9"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           if [[ "$tag" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
             echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
@@ -83,8 +86,14 @@ jobs:
         env:
           RELEASE_BODY: ${{ steps.git-cliff.outputs.content || steps.fallback.outputs.body }}
         run: |
-          if [[ "$RELEASE_BODY" != *"## 1.3.0"* ]]; then
-            echo "::error::changelog body does not contain '## 1.3.0'"
+          if [[ "$RELEASE_BODY" != *"## 9.9.9"* ]]; then
+            echo "::error::changelog body does not contain '## 9.9.9'"
             exit 1
           fi
-          echo "OK: changelog body contains '## 1.3.0'"
+          # 用 cliff.toml 的自定义分组标题，确认走的是我们的配置而不是
+          # git-cliff 的内置默认配置（默认是「## [x.y.z] - date」+ 英文分组）
+          if [[ "$RELEASE_BODY" != *"✨ 新功能"* && "$RELEASE_BODY" != *"🐛 Bug修复"* ]]; then
+            echo "::error::changelog body is not using cliff.toml's custom groups"
+            exit 1
+          fi
+          echo "OK: changelog body contains '## 9.9.9' and uses cliff.toml groups"
