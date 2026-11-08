@@ -89,6 +89,27 @@ pytest tests/test_basic.py -v  # 运行特定文件
 
 节点一旦加载会持续驻留到 Resource，直到调用 `clear_pipeline_resources()` 或进程结束。
 
+### JSONC 语法支持（issue #38）
+
+MaaFramework 自带的 pipeline 解析器（meojson 的 `json::parsec`）接受 JSONC，因此 MaaMCP 也必须接受——否则同一份文件在 MaaFramework 能加载、在 MaaMCP 却报解析失败。
+
+[jsonc.py](maa_mcp/jsonc.py) 在 Python 侧复刻了这套语义（不引入任何新依赖）：
+
+- 允许：`//` 行注释、`/* */` 块注释、对象/数组尾逗号（__空__容器里的逗号 `{,}` / `[,]` 仍是语法错误，与 MaaFramework 一致）
+- 拒绝（与 MaaFramework 一致）：无引号键、单引号字符串、`NaN` / `Infinity`、重复键、落单的代理字符（如 `"\ud800"`）
+
+生效范围：`load_pipeline` / `run_pipeline` / `benchmark_node` 读取的 pipeline 文件、`save_pipeline` 的 `pipeline_json` 输入字符串（落盘仍是格式化后的标准 JSON，注释丢弃）、以及 agent supervisor 读取的 `interface.json`。
+
+实现要点：先把注释替换成等长空白（保留换行），再剥掉尾逗号，最后交给标准库 `json.loads`。字节偏移保持不变，因此标准库自带的行列号报错可直接对到原文件（文件带 UTF-8 BOM 时位置会偏移一个字符——BOM 在解析前被剥掉）。
+
+三处有意偏离 meojson：
+
+1. 溢出成 `inf` 的数字（`1e999`）会被拒绝——MaaMCP 会把解析结果重新序列化成严格 JSON 再交给 `Resource.override_pipeline`，meojson 按字面量保存能原样往返，我们写回去会是非法的 `Infinity` 字面量。
+2. `loads` 接受任意顶层值，而 meojson 只接受对象/数组（调用方仍要求顶层为非空对象）。
+3. 顶层值__之后__的尾部残余按错误处理。meojson 的 `skip_whitespace` 把「已到输入末尾」与「注释起始符非法」混为一谈，会静默接受并丢弃尾部残余（如 `/x` 或未闭合的块注释），MaaFramework 继承了这一行为。这一处的方向是「更严」——MaaMCP 不会接受 MaaFramework 拒绝的文件；未闭合注释出现在文档__内部__时两边都拒绝。
+
+`interface.json` 的注意事项：MaaMCP 这里容忍注释，MFAAvalonia 也容忍（Newtonsoft.Json 会跳过注释）。但 MAAGC 自己的 `agent/main.py` 用标准库 `json.load` 读同一个文件来检测版本——带注释的 `interface.json` 会让它记一条异常并回退到版本 `"unknown"`（该值只用来区分 dev 模式与 venv 准备）。依赖 MAAGC 版本检测时，`interface.json` 保持无注释。
+
 ### Agent 子进程生命周期（Custom Action 支持）
 
 对于含 `action: "Custom"` 节点的 pipeline（如 MAAGC 的 `TaskProcessor` / `YearlyTaskProcessor`），MaaMCP 启动一个 Python agent 子进程来托管自定义回调，对齐 MFAAvalonia 模式。
@@ -187,6 +208,12 @@ TemplateMatch / OCR / ColorMatch 节点不稳定时，按这个循环迭代（is
 8. 重复 2-7 直到稳定
 
 MaaMCP 侧 pipeline infra 集成测试见 `tests/test_dbg_pipeline.py`（标 `@pytest.mark.integration`；缺 `MaaDbgControlUnit` DLL 时自动 skip）。
+
+### 压力测试必须显式开启——绝不自动挑窗口
+
+`tests/test_performance_stress.py` 会操作__真实__设备/窗口（点击、滑动、输入文本、按键）。默认整体跳过：需设置 `MAA_STRESS=1`，并用 `MAA_STRESS_DEVICE` / `MAA_STRESS_WINDOW` 显式指定目标。
+
+不要用「取 `find_window_list()[0]`」来"修好"它：桌面窗口列表的第一项通常是用户正在用的编辑器（VS Code），压力测试合成的点击与按键会直接打上去——曾导致一次普通的 `pytest tests/` 把 VS Code 关掉。这与 [win32.py](maa_mcp/win32.py) 里的约定一致：多个窗口时绝不自动选择。
 
 ## 本地化
 

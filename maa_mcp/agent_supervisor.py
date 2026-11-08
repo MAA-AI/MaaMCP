@@ -36,6 +36,7 @@ from maa.resource import Resource
 from maa.tasker import Tasker
 
 from maa_mcp.core import object_registry
+from maa_mcp.jsonc import loads as jsonc_loads
 
 # ---------------------------------------------------------------------------
 # 平台相关常量（Windows JobObject）
@@ -125,8 +126,8 @@ def load_agent_config(resource_path: Optional[str]) -> Optional[AgentConfig]:
         if not cfg_path.is_file():
             continue
         try:
-            data = json.loads(cfg_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as e:
+            data = jsonc_loads(cfg_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError, RecursionError) as e:
             logger.warning(f"解析 {cfg_path} 失败: {e}")
             return None
         if not isinstance(data, dict):

@@ -1,5 +1,22 @@
-"""压力测试 - 测量关键函数在高负载下的性能表现"""
+"""压力测试 - 测量关键函数在高负载下的性能表现
 
+⚠️ 本文件会向**真实**设备 / 窗口发送点击、滑动、输入文本与按键，因此默认
+整体跳过，必须显式开启：
+
+```bash
+# 只压测指定设备（ADB）
+MAA_STRESS=1 MAA_STRESS_DEVICE="127.0.0.1:7555" pytest tests/test_performance_stress.py -v
+
+# 只压测指定窗口（Windows）
+MAA_STRESS=1 MAA_STRESS_WINDOW="MuMu模拟器" pytest tests/test_performance_stress.py -v
+```
+
+目标必须通过环境变量显式指定，**绝不自动挑选第一个窗口 / 第一台设备**——
+`find_window_list()` 的第一项往往就是用户正在使用的 IDE 窗口，压力测试的
+点击与按键会直接打到它身上（曾导致 pytest 跑完把 VSCode 关掉）。
+"""
+
+import os
 import time
 import pytest
 from typing import Callable, Any, Optional, List, Dict
@@ -9,6 +26,15 @@ from maa_mcp.control import click, swipe, input_text, click_key, scroll, double_
 from maa_mcp.core import controller_info_registry, ControllerType
 from maa_mcp.adb import find_adb_device_list, connect_adb_device
 from maa_mcp.win32 import find_window_list, connect_window
+
+# 压力测试会操作真实设备 / 窗口，属于集成级且默认关闭
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.environ.get("MAA_STRESS", "").strip().lower() not in {"1", "true", "yes"},
+        reason="压力测试会向真实设备/窗口发送点击与按键，需设置 MAA_STRESS=1 显式开启",
+    ),
+]
 
 
 def _call_tool(func, *args, **kwargs):
@@ -206,30 +232,50 @@ class TestStressPerformance:
         self.device_name = None
         self.window_name = None
 
-        # 尝试获取ADB设备
-        try:
-            device_list = _call_tool(find_adb_device_list)
-            if device_list:
-                self.device_name = device_list[0]  # 使用第一个设备
+        # 目标必须显式指定：绝不自动挑第一个设备 / 窗口——
+        # 第一个窗口往往就是用户正在用的 IDE 窗口，压力测试的点击与按键
+        # 会直接打上去（曾把 VSCode 关掉）。
+        device_name = os.environ.get("MAA_STRESS_DEVICE", "").strip()
+        window_name = os.environ.get("MAA_STRESS_WINDOW", "").strip()
+
+        if not device_name and not window_name:
+            pytest.skip(
+                "未指定压力测试目标：设置 MAA_STRESS_DEVICE 或 MAA_STRESS_WINDOW "
+                "（绝不自动选择第一个窗口 / 设备，以免干扰用户正在使用的程序）"
+            )
+
+        # 指定的 ADB 设备
+        if device_name:
+            try:
+                device_list = _call_tool(find_adb_device_list)
+                if device_name not in device_list:
+                    pytest.skip(
+                        f"指定的 ADB 设备 {device_name!r} 不存在，"
+                        f"可用设备: {device_list}"
+                    )
+                self.device_name = device_name
                 self.controller_id = _call_tool(connect_adb_device, self.device_name)
                 print(
                     f"  使用ADB设备: {self.device_name}, 控制器ID: {self.controller_id}"
                 )
-        except Exception as e:
-            print(f"  获取ADB设备失败: {e}")
+            except Exception as e:
+                print(f"  连接ADB设备失败: {e}")
 
-        # 如果没有ADB设备，尝试获取Windows窗口
-        if not self.controller_id:
+        # 指定的 Windows 窗口
+        if not self.controller_id and window_name:
             try:
                 window_list = _call_tool(find_window_list)
-                if window_list:
-                    self.window_name = window_list[0]  # 使用第一个窗口
-                    self.controller_id = _call_tool(connect_window, self.window_name)
-                    print(
-                        f"  使用Windows窗口: {self.window_name}, 控制器ID: {self.controller_id}"
+                if window_name not in window_list:
+                    pytest.skip(
+                        f"指定的窗口 {window_name!r} 不存在，可用窗口: {window_list}"
                     )
+                self.window_name = window_name
+                self.controller_id = _call_tool(connect_window, self.window_name)
+                print(
+                    f"  使用Windows窗口: {self.window_name}, 控制器ID: {self.controller_id}"
+                )
             except Exception as e:
-                print(f"  获取Windows窗口失败: {e}")
+                print(f"  连接Windows窗口失败: {e}")
 
         # 如果仍然没有控制器，跳过测试类
         if not self.controller_id:
@@ -635,6 +681,15 @@ class PerformanceTestInterface:
 # 压力测试示例脚本（可直接运行）
 if __name__ == "__main__":
     """压力测试示例 - 展示如何使用压力测试模块"""
+
+    if os.environ.get("MAA_STRESS", "").strip().lower() not in {"1", "true", "yes"}:
+        print(
+            "压力测试会向真实设备/窗口发送点击与按键，已跳过。\n"
+            "请先设置 MAA_STRESS=1，并指定 MAA_STRESS_DEVICE 或 MAA_STRESS_WINDOW。\n"
+            '示例: MAA_STRESS=1 MAA_STRESS_WINDOW="MuMu模拟器" '
+            "python tests/test_performance_stress.py"
+        )
+        raise SystemExit(1)
 
     print("MaaMCP 压力测试示例")
     print("=" * 60)
