@@ -230,11 +230,20 @@ class TestJsoncLoads:
         with pytest.raises(json.JSONDecodeError, match="Duplicate key"):
             _sanitize_surrogates(payload, "{}")
 
-    def test_comment_stripping_preserves_length(self) -> None:
-        """注释替换成等长空白，长度不变（错误位置才对得上原文）。"""
+    def test_comment_stripping_blanks_comments_and_preserves_length(self) -> None:
+        """注释必须真的被置空，且长度不变（错误位置才对得上原文）。"""
         text = '{\n// 注释\n"A": 1 /* 块注释 */\n}'
 
-        assert len(_strip_comments(text)) == len(text)
+        result = _strip_comments(text)
+
+        # 长度不变：位置信息才对得上原文
+        assert len(result) == len(text)
+        # 注释内容确实被抹掉（不是原样返回）
+        assert "//" not in result
+        assert "/*" not in result
+        assert "注释" not in result
+        # 抹掉注释后仍是合法 JSON，且内容不变
+        assert json.loads(result) == {"A": 1}
 
     def test_value_error_converted_to_decode_error(
         self, monkeypatch: pytest.MonkeyPatch
