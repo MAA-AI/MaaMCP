@@ -202,6 +202,12 @@ When a TemplateMatch / OCR / ColorMatch node isn't reliable, iterate this loop (
 
 For MaaMCP-side pipeline infra testing, see `tests/test_dbg_pipeline.py` (gated by `@pytest.mark.integration`; skips if `MaaDbgControlUnit` DLL isn't shipped).
 
+### Stress tests are opt-in — never auto-pick a window
+
+`tests/test_performance_stress.py` drives __real__ devices/windows (clicks, swipes, typed text, key presses). It is skipped unless `MAA_STRESS=1` is set, and the target must be named explicitly via `MAA_STRESS_DEVICE` / `MAA_STRESS_WINDOW`.
+
+Do not "fix" it by picking `find_window_list()[0]`: the first desktop window is usually the user's editor (VS Code), and the stress test's synthetic clicks/keystrokes land on it — this closed VS Code during a plain `pytest tests/` run. This mirrors the rule in [win32.py](maa_mcp/win32.py): never auto-select a window when several are available.
+
 ## Localization
 
 - [CLAUDE_CN.md](CLAUDE_CN.md): Chinese version of this document

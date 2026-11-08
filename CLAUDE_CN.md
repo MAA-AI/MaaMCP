@@ -201,6 +201,12 @@ TemplateMatch / OCR / ColorMatch 节点不稳定时，按这个循环迭代（is
 
 MaaMCP 侧 pipeline infra 集成测试见 `tests/test_dbg_pipeline.py`（标 `@pytest.mark.integration`；缺 `MaaDbgControlUnit` DLL 时自动 skip）。
 
+### 压力测试必须显式开启——绝不自动挑窗口
+
+`tests/test_performance_stress.py` 会操作__真实__设备/窗口（点击、滑动、输入文本、按键）。默认整体跳过：需设置 `MAA_STRESS=1`，并用 `MAA_STRESS_DEVICE` / `MAA_STRESS_WINDOW` 显式指定目标。
+
+不要用「取 `find_window_list()[0]`」来"修好"它：桌面窗口列表的第一项通常是用户正在用的编辑器（VS Code），压力测试合成的点击与按键会直接打上去——曾导致一次普通的 `pytest tests/` 把 VS Code 关掉。这与 [win32.py](maa_mcp/win32.py) 里的约定一致：多个窗口时绝不自动选择。
+
 ## 本地化
 
 - [CLAUDE.md](CLAUDE.md)：本文档的英文版
