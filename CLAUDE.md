@@ -89,6 +89,19 @@ Loading is atomic: all pre-validation (file existence, JSON validity, conflict d
 
 Once loaded, pipeline nodes persist in the Resource until `clear_pipeline_resources()` is called or the process exits.
 
+### JSONC Support (issue #38)
+
+MaaFramework's own pipeline parser (meojson `json::parsec`) accepts JSONC, so MaaMCP must too — otherwise the same file loads in MaaFramework but fails in MaaMCP.
+
+[jsonc.py](maa_mcp/jsonc.py) re-implements that semantics in Python (zero new dependencies):
+
+- Allowed: `//` line comments, `/* */` block comments, trailing commas in objects/arrays
+- Rejected (same as MaaFramework): unquoted keys, single-quoted strings, `NaN` / `Infinity`, duplicate keys
+
+Where it applies: pipeline files read by `load_pipeline` / `run_pipeline` / `benchmark_node`, the `pipeline_json` string passed to `save_pipeline` (output is still normalized standard JSON — comments are dropped), and `interface.json` read by the agent supervisor.
+
+Implementation note: comments are replaced with equal-length whitespace (newlines preserved), then trailing commas are stripped, then the text goes to stdlib `json.loads`. Byte offsets are preserved, so stdlib's line/column error positions apply directly to the original file.
+
 ### Agent Subprocess Lifecycle (Custom Action Support)
 
 For pipelines containing `action: "Custom"` nodes (e.g. MAAGC's `TaskProcessor` / `YearlyTaskProcessor`), MaaMCP spawns a Python agent subprocess to host the custom callbacks, following the MFAAvalonia pattern.

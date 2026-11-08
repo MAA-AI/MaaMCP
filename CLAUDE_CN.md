@@ -89,6 +89,19 @@ pytest tests/test_basic.py -v  # 运行特定文件
 
 节点一旦加载会持续驻留到 Resource，直到调用 `clear_pipeline_resources()` 或进程结束。
 
+### JSONC 语法支持（issue #38）
+
+MaaFramework 自带的 pipeline 解析器（meojson 的 `json::parsec`）接受 JSONC，因此 MaaMCP 也必须接受——否则同一份文件在 MaaFramework 能加载、在 MaaMCP 却报解析失败。
+
+[jsonc.py](maa_mcp/jsonc.py) 在 Python 侧复刻了这套语义（不引入任何新依赖）：
+
+- 允许：`//` 行注释、`/* */` 块注释、对象/数组尾逗号
+- 拒绝（与 MaaFramework 一致）：无引号键、单引号字符串、`NaN` / `Infinity`、重复键
+
+生效范围：`load_pipeline` / `run_pipeline` / `benchmark_node` 读取的 pipeline 文件、`save_pipeline` 的 `pipeline_json` 输入字符串（落盘仍是格式化后的标准 JSON，注释丢弃）、以及 agent supervisor 读取的 `interface.json`。
+
+实现要点：先把注释替换成等长空白（保留换行），再剥掉尾逗号，最后交给标准库 `json.loads`。字节偏移保持不变，因此标准库自带的行列号报错可直接对到原文件。
+
 ### Agent 子进程生命周期（Custom Action 支持）
 
 对于含 `action: "Custom"` 节点的 pipeline（如 MAAGC 的 `TaskProcessor` / `YearlyTaskProcessor`），MaaMCP 启动一个 Python agent 子进程来托管自定义回调，对齐 MFAAvalonia 模式。

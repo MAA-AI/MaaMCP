@@ -19,6 +19,7 @@ from typing import Any, List, Optional, Union
 from loguru import logger
 
 from maa_mcp.core import mcp, object_registry
+from maa_mcp.jsonc import loads as jsonc_loads
 from maa_mcp.paths import ensure_within_pipelines_dir, get_data_dir
 from maa_mcp.resource import (
     add_resource_path,
@@ -512,7 +513,7 @@ def _read_and_validate_pipelines(
     校验项：
     1. 文件存在
     2. 路径是文件（不是目录）
-    3. JSON 解析成功
+    3. JSONC 解析成功（允许注释与尾逗号，与 MaaFramework 一致）
     4. 顶层是非空 dict
 
     Args:
@@ -533,9 +534,11 @@ def _read_and_validate_pipelines(
             raise ValueError(f"Pipeline 路径不是文件: {f}")
         try:
             with open(path, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
+                data = jsonc_loads(fh.read())
         except json.JSONDecodeError as e:
             raise ValueError(f"Pipeline JSON 解析失败: {f}: {e}") from e
+        except UnicodeDecodeError as e:
+            raise ValueError(f"Pipeline 文件不是合法的 UTF-8 文本: {f}: {e}") from e
         if not isinstance(data, dict) or not data:
             raise ValueError(f"Pipeline 文件格式错误（顶层必须是非空对象）: {f}")
         result.append((str(path.absolute()), data))
@@ -810,6 +813,8 @@ def _build_run_result(
     说明：
     - 用于读取已保存的 Pipeline 进行查看或修改，修改后可调用 save_pipeline() 保存。
     - 本工具只做文件 I/O，不触碰 Resource。合并/写入是 run_pipeline 的职责。
+    - 支持 JSONC 语法：文件里的 `//` 与 `/* */` 注释、对象/数组尾逗号都能正常解析
+      （与 MaaFramework 的解析器行为一致）；返回值是解析后的 dict，注释不保留。
     - 安全约束：所有路径必须位于用户数据目录下的 pipelines/ 子目录内，
       越界路径会被拒绝。读取项目资源目录下的 pipeline 请使用 run_pipeline。
 """,
@@ -861,6 +866,8 @@ def load_pipeline(pipeline_path: Union[str, List[str]]) -> dict | str:
 
     说明：
     可用于新建 Pipeline 或更新已有 Pipeline（指定 output_path 为已有文件路径即可覆盖更新）。
+    - pipeline_json 支持 JSONC 语法（`//` 与 `/* */` 注释、尾逗号），与 MaaFramework 一致；
+      但写盘时统一输出格式化后的标准 JSON，注释不会保留。
     - 安全约束：output_path 必须位于用户数据目录下的 pipelines/ 子目录内，
       越界路径会被拒绝。
 """,
@@ -871,9 +878,9 @@ def save_pipeline(
     name: Optional[str] = None,
     overwrite: bool = True,
 ) -> str:
-    # 验证 JSON 格式
+    # 验证 JSON 格式（允许注释与尾逗号，与 MaaFramework 一致）
     try:
-        pipeline = json.loads(pipeline_json)
+        pipeline = jsonc_loads(pipeline_json)
     except json.JSONDecodeError as e:
         return f"Pipeline JSON 格式错误: {e}"
 
@@ -943,6 +950,8 @@ def save_pipeline(
     - pipeline_path: Pipeline JSON 文件路径（str），或多个路径组成的列表。
                   多文件场景下，按列表顺序合并节点到同一全局节点表；
                   一个文件的节点可以引用另一文件中的节点。
+                  文件支持 JSONC 语法（`//` 与 `/* */` 注释、对象/数组尾逗号），
+                  与 MaaFramework 的解析器行为一致。
     - entry: 入口节点名称（可选）。不指定时使用 pipeline_path 第一个文件的第一个节点。
     - resource_path: 资源目录路径（可选），用于指定 Pipeline 所需的资源文件路径。
       如果不指定，则使用 MaaMCP 默认的资源目录。
