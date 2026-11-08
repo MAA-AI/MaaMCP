@@ -14,6 +14,9 @@ jobs:
   changelog:
     name: Generate changelog
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout 仓库
+      pull-requests: read # git-cliff 拉取 PR 元数据（贡献者统计）
     outputs:
       release_body: ${{ steps.git-cliff.outputs.content || steps.fallback.outputs.body }}
     steps:
